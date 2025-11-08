@@ -1,0 +1,16 @@
+name: music-segmentation-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - fastapi
+  - uvicorn
+  - ffmpeg
+  - librosa
+  - numpy
+  - scipy
+  - numba
+  - pip
+  - pip:
+    - soundfile
