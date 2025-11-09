@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Service
+  db:
+    image: postgres:18-alpine
+    container_name: music_segmentation_db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:${DB_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Backend (FastAPI)
+  backend:
+    build: .
+    container_name: music_segmentation_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # hot-reloading for development
+      - ./backend:/app/backend
+    env_file:
+      - ./.env
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
