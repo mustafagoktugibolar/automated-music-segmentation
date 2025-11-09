@@ -11,6 +11,9 @@ dependencies:
   - numpy
   - scipy
   - numba
+  - SQLAlchemy
+  - psycopg2-binary
+  - pydantic-settings
   - pip
   - pip:
     - soundfile
