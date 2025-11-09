@@ -23,6 +23,7 @@ services:
     volumes:
       # hot-reloading for development
       - ./backend:/app/backend
+      - ./logs:/app/logs
     env_file:
       - ./.env
     depends_on:
