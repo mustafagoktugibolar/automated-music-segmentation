@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 import uvicorn
 
-from core import logger
+from backend.core import logger
 
 app = FastAPI()
-  
+
 @app.get("/probe")
 def probe():
     logger.info("Probe called!")

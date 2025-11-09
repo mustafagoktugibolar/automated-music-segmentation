@@ -1,48 +1,71 @@
 # Music Segmentation Project
 
-This project is a automated music segmentation tool.
+This project is an automated music segmentation tool.
 
 ## Getting Started
 
-Follow these instructions to get the project up and running on your local machine for development and testing purposes.
+This project uses Docker and Docker Compose to manage all its services, including the backend API and the PostgreSQL database.
 
 ### Prerequisites
 
-Before you begin, ensure you have [Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://www.anaconda.com/products/distribution) installed on your system.
+-   [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running on your system.
 
-### Installation
+### Installation & Setup
 
-1.  **Clone the repository**
+1.  **Clone the Repository**
 
-    If you haven't already, clone the project repository to your local machine.
+    Clone the project to your local machine.
     ```bash
     git clone <https://github.com/mustafagoktugibolar/automated-music-segmentation.git>
     cd music-segmentation
     ```
 
-2.  **Create the Conda Environment**
+2.  **Create Environment File**
 
-    Use the `environment.yml` file to create a new Conda environment with all the required dependencies. This will create an environment named `music-segmentation-env`.
-
+    Copy the template file `.env.template` to a new file named `.env`.
     ```bash
-    conda env create -f environment.yml
+    cp .env.template .env
+    ```
+    Open the `.env` file and change `DB_PASSWORD` to a password of your choice. All other default values are configured to work with Docker Compose out-of-the-box.
+
+## Running the Application with Docker
+
+The entire application stack (backend + database) is managed by Docker Compose.
+
+1.  **Build and Run the Services**
+
+    From the project's root directory, run the following command. This will build the backend Docker image and start all services in the background.
+    ```bash
+    docker-compose up -d --build
     ```
 
-3.  **Activate the Environment**
+2.  **Check the Status**
 
-    To start using the project, you must activate the Conda environment in your terminal session.
-
+    To see if the containers are running correctly, you can use:
     ```bash
-    conda activate music-segmentation-env
+    docker-compose ps
     ```
-    Your terminal prompt should now indicate that you are in the `(music-segmentation-env)`.
+    You should see both `music_segmentation_db` and `music_segmentation_backend` with a status of "running" or "Up".
 
-## Running the Application
+3.  **Access the API**
 
-Once the setup is complete and the environment is activated, you can run the backend application.
+    Once the services are running, the API will be available at `http://localhost:8000`. You can test it by navigating to the health check endpoint:
+    `http://localhost:8000/probe`
 
+### Viewing Logs
+
+To view the real-time logs from the backend service (useful for debugging):
 ```bash
-python backend/main.py
+docker-compose logs -f backend
 ```
 
-This will execute the main Python script and start the backend service.
+### Stopping the Application
+
+To stop all running services:
+```bash
+docker-compose down
+```
+To stop the services and remove the database volume (deleting all data):
+```bash
+docker-compose down -v
+```
