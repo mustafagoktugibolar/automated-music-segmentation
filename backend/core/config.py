@@ -1,12 +1,19 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import computed_field
 
-class Settings(BaseSettings):
+class DB_Settings(BaseSettings):
     DB_HOST: str
     DB_PORT: int
     DB_USER: str
     DB_PASSWORD: str
     DB_NAME: str
+    
+    # Pooling settings
+    PG_MIN_CONN: int = 1
+    PG_MAX_CONN: int = 10
+    PG_RETRY_COUNT: int = 5
+    PG_RETRY_WAIT: int = 3
+    PG_STATEMENT_TIMEOUT_MS: int = 15000
     
     @computed_field
     @property
@@ -15,4 +22,4 @@ class Settings(BaseSettings):
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8')
     
-settings = Settings()
+settings = DB_Settings()
