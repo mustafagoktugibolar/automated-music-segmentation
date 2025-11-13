@@ -6,6 +6,8 @@
             "type": "debugpy",
             "request": "launch",
             "module": "backend.main",
+            "env": { "APP_ENV": "dev" },
+            "envFile": "${workspaceFolder}/.env.dev",
             "jinja": true,
             "justMyCode": true
         }
