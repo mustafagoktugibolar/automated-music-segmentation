@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from backend.services import segmentation_service
-from backend.core import logger
+from shared.logger import get_logger
+
+logger = get_logger()
 
 router = APIRouter(prefix="/segmentation", tags=["Segmentation"])
 
@@ -16,8 +17,8 @@ async def upload_and_segment_audio(
         )
         
     try:
-        result = await segmentation_service.analyze_and_segment_audio(file)
-        return result
+        #result = await segmentation_service.analyze_and_segment_audio(file)
+        return "" 
     except Exception as e:
         logger.error(f"An error occurred during file processing: {e}", exc_info=True)
         raise HTTPException(

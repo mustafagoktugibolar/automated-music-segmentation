@@ -9,7 +9,9 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 
-from backend.core import logger
+from shared.logger import get_ogger
+
+logger = get_ogger()
 
 # --- Tunable Parameters (Quality-Oriented) ---
 

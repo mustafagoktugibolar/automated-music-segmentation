@@ -1,19 +1,21 @@
 from fastapi import FastAPI, Request, Depends
-from .config import settings
+from shared.config import DBSettings
 from contextlib import asynccontextmanager
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 from typing import Generator, Optional
-from backend.core import logger
+from shared.logger import get_logger
 
 import psycopg2
 import asyncio
 
-MIN_CONN = settings.PG_MIN_CONN
-MAX_CONN = settings.PG_MAX_CONN
-RETRY_COUNT = settings.PG_RETRY_COUNT
-RETRY_WAIT = settings.PG_RETRY_WAIT
-STMT_TIMEOUT_MS = settings.PG_STATEMENT_TIMEOUT_MS
+logger = get_logger()
+
+MIN_CONN = DBSettings.PG_MIN_CONN
+MAX_CONN = DBSettings.PG_MAX_CONN
+RETRY_COUNT = DBSettings.PG_RETRY_COUNT
+RETRY_WAIT = DBSettings.PG_RETRY_WAIT
+STMT_TIMEOUT_MS = DBSettings.PG_STATEMENT_TIMEOUT_MS
 
 def prepare_db_connection(conn) -> None:
     conn.autocommit = False
@@ -26,7 +28,7 @@ def prepare_db_connection(conn) -> None:
 
 
 def register_db(app: FastAPI) -> None:
-    if not getattr(settings, "DB_URL", None):
+    if not getattr(DBSettings, "DB_URL", None):
         logger.error("DB_URL is not set in settings.")
         raise RuntimeError("DB_URL is required in settings.")
     
@@ -41,7 +43,7 @@ def register_db(app: FastAPI) -> None:
                 pool = ThreadedConnectionPool(
                     minconn=MIN_CONN,
                     maxconn=MAX_CONN,
-                    dsn=settings.DB_URL
+                    dsn=DBSettings.DB_URL
                 )
                 conn = pool.getconn()
                 try:

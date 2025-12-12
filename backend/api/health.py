@@ -1,11 +1,12 @@
 # backend/api/health.py
 from fastapi import APIRouter, Request
-from backend.core.db import ping_db
-from backend.core import logger
+from shared.logger import get_logger
+from backend.db.postgreSQL import ping_db
 import os
 import platform
 import time
 
+logger = get_logger()
 router = APIRouter(prefix="/health", tags=["health"])
 START_TIME = time.time()
 

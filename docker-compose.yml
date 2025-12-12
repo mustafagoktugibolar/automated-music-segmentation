@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Service
   db:
@@ -14,20 +12,84 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # RabbitMQ Service
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: music_segmentation_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   # Backend (FastAPI)
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: music_segmentation_backend
     ports:
       - "8000:8000"
     volumes:
-      # hot-reloading for development
       - ./backend:/app/backend
+      - ./shared:/app/shared
       - ./logs:/app/logs
+      - media_data:/app/media
     env_file:
       - ./.env
+    environment:
+      - SERVICE_NAME=segmentation-api
     depends_on:
       - db
+      - rabbitmq
+  # Worker: Custom Segmentation
+  # worker-custom:
+  #   build:
+  #     context: .
+  #     dockerfile: workers/Dockerfile
+  #   container_name: music_segmentation_worker_custom
+  #   volumes:
+  #     - ./workers:/app/workers
+  #     - ./shared:/app/shared
+  #     - ./logs:/app/logs
+  #     - media_data:/app/media
+  #   env_file:
+  #     - ./.env
+  #   environment:
+  #     - SERVICE_NAME=worker-custom
+  #     - WORKER_TYPE=custom_segmentation
+  #   depends_on:
+  #     - rabbitmq
+
+  # Worker: MSAF Segmentation (Scaled)
+  # worker-msaf:
+  #   build:
+  #     context: .
+  #     dockerfile: workers/Dockerfile
+  #   # container_name: Sabit isim kullanamayız çünkü scale edilecek
+  #   deploy:
+  #     replicas: 3
+  #   volumes:
+  #     - ./workers:/app/workers
+  #     - ./shared:/app/shared
+  #     - ./logs:/app/logs
+  #     - media_data:/app/media
+  #   env_file:
+  #     - ./.env
+  #   environment:
+  #     - SERVICE_NAME=worker-msaf
+  #     - WORKER_TYPE=msaf_segmentation
+  #   depends_on:
+  #     - rabbitmq
 
 volumes:
   postgres_data:
+  rabbitmq_data:
+  media_data:

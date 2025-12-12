@@ -1,0 +1,12 @@
+name: music-segmentation-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - fastapi
+  - uvicorn
+  - SQLAlchemy
+  - psycopg2-binary
+  - pydantic-settings
+  - pika
