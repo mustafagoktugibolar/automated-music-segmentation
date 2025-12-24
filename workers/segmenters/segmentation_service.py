@@ -3,15 +3,15 @@ from collections import Counter
 
 import librosa
 import numpy as np
-from fastapi import UploadFile
+# from fastapi import UploadFile  <-- Removed
 from scipy.signal import correlate2d
 from scipy.ndimage import gaussian_filter1d
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 
-from shared.logger import get_ogger
+from shared.logger import get_logger
 
-logger = get_ogger()
+logger = get_logger()
 
 # --- Tunable Parameters (Quality-Oriented) ---
 
@@ -503,115 +503,124 @@ def _cluster_and_label_segments(
 # Main entrypoint
 # -------------------------------------------------------------------------
 
-async def analyze_and_segment_audio(file: UploadFile):
-    """
-    Orchestrates the audio segmentation process.
-    Pipeline:
-      1. Load audio.
-      2. Detect active music region [active_start, active_end] via RMS.
-      3. Run segmentation ONLY on y_active = y[active_start:active_end].
-      4. Cluster + label segments (Intro/Verse/Chorus/Outro/Other).
-      5. Shift segment times back to original timeline.
-    """
-    logger.info(f"Starting analysis for: {file.filename}")
+# -------------------------------------------------------------------------
+# Main entrypoints
+# -------------------------------------------------------------------------
 
+def process_file_path(file_path: str):
+    """
+    Worker-friendly entry point. Reads file from disk.
+    """
+    logger.info(f"Starting analysis for file path: {file_path}")
     try:
-        content = await file.read()
-        y, sr = _load_audio_from_bytes(content)
-
-        original_duration = librosa.get_duration(y=y, sr=sr)
-        logger.info(f"Loaded audio: sr={sr}, original_duration≈{original_duration:.2f}s")
-
-        # --- 1) Detect active music region (adaptive, per track) ---
-        active_start_s, active_end_s = _detect_active_region(
-            y,
-            sr,
-            hop_length=CQT_HOP_LENGTH,
-            margin_db=ACTIVE_MARGIN_DB,
-            min_region_s=MIN_ACTIVE_REGION_SECONDS,
-        )
-        core_duration = max(0.0, active_end_s - active_start_s)
-
-        logger.info(
-            f"Active music region: start={active_start_s:.2f}s, "
-            f"end={active_end_s:.2f}s, core_duration≈{core_duration:.2f}s"
-        )
-
-        if core_duration <= 0.0:
-            logger.warning("No clear active region detected; returning empty segmentation.")
-            return {
-                "filename": file.filename,
-                "content_type": file.content_type,
-                "duration_seconds": round(original_duration, 2),
-                "segments": [],
-                "status": "No clear active music region detected.",
-            }
-
-        # Slice out only the active region for analysis.
-        start_sample = int(active_start_s * sr)
-        end_sample = int(active_end_s * sr)
-        y_active = y[start_sample:end_sample]
-
-        # --- 2) Extract chroma on active region ---
-        logger.info("Extracting chroma features (active region only)...")
-        chroma_features = _extract_chroma_features(y_active, sr)
-        logger.info(f"Chroma shape (n_chroma, n_frames): {chroma_features.shape}")
-
-        if DOWNSAMPLE_FACTOR > 1:
-            chroma_features_ds = chroma_features[:, ::DOWNSAMPLE_FACTOR]
-        else:
-            chroma_features_ds = chroma_features
-
-        effective_hop_length = CQT_HOP_LENGTH * DOWNSAMPLE_FACTOR
-        logger.info(
-            f"Downsampled chroma shape: {chroma_features_ds.shape}, "
-            f"effective_hop_length={effective_hop_length}"
-        )
-
-        # --- 3) SSM & novelty ---
-        logger.info("Computing self-similarity matrix...")
-        ssm = _compute_ssm(chroma_features_ds)
-        logger.info(f"SSM shape: {ssm.shape}")
-
-        logger.info("Computing novelty curve and finding boundaries...")
-        frames_per_second = sr / effective_hop_length
-        kernel_size_frames = int(NOVELTY_KERNEL_SIZE_SECONDS * frames_per_second)
-        kernel_size_frames = max(1, min(kernel_size_frames, MAX_KERNEL_BLOCK_SIZE))
-
-        novelty_curve = _compute_novelty_curve(ssm, kernel_size_frames=kernel_size_frames)
-        boundaries_core = _find_boundaries(
-            novelty_curve,
-            sr=sr,
-            hop_length=effective_hop_length,
-            min_segment_duration_s=MIN_SEGMENT_DURATION_SECONDS,
-        )
-        logger.info(f"Detected {len(boundaries_core)} boundaries inside active region.")
-
-        # --- 4) Cluster & label segments in active region ---
-        logger.info("Clustering and labeling segments...")
-        segments_core = _cluster_and_label_segments(
-            chroma_features_ds,
-            boundaries_core,
-            sr,
-            effective_hop_length,
-            N_CLUSTERS,
-            total_duration=core_duration,
-        )
-
-        # --- 5) Shift times back to original timeline ---
-        for seg in segments_core:
-            seg["start"] = round(seg["start"] + active_start_s, 2)
-            seg["end"] = round(seg["end"] + active_start_s, 2)
-
-        logger.info(f"Successfully processed {file.filename}")
-
-        return {
-            "filename": file.filename,
-            "content_type": file.content_type,
-            "duration_seconds": round(original_duration, 2),
-            "segments": segments_core,
-            "status": "Segmentation and labeling complete.",
-        }
+        with open(file_path, 'rb') as f:
+            content = f.read()
+        
+        filename = file_path.split("/")[-1]
+        
+        # Reuse the core logic by passing content bytes
+        return _analyze_content(content, filename)
     except Exception as e:
-        logger.error(f"Error processing file {file.filename}", exc_info=e)
+        logger.error(f"Error processing file path {file_path}", exc_info=e)
         raise e
+
+
+def _analyze_content(content: bytes, filename: str, content_type: str = "audio/wav"):
+    """
+    Shared core logic for segmentation.
+    """
+    y, sr = _load_audio_from_bytes(content)
+
+    original_duration = librosa.get_duration(y=y, sr=sr)
+    logger.info(f"Loaded audio: sr={sr}, original_duration≈{original_duration:.2f}s")
+
+    # --- 1) Detect active music region (adaptive, per track) ---
+    active_start_s, active_end_s = _detect_active_region(
+        y,
+        sr,
+        hop_length=CQT_HOP_LENGTH,
+        margin_db=ACTIVE_MARGIN_DB,
+        min_region_s=MIN_ACTIVE_REGION_SECONDS,
+    )
+    core_duration = max(0.0, active_end_s - active_start_s)
+
+    logger.info(
+        f"Active music region: start={active_start_s:.2f}s, "
+        f"end={active_end_s:.2f}s, core_duration≈{core_duration:.2f}s"
+    )
+
+    if core_duration <= 0.0:
+        logger.warning("No clear active region detected; returning empty segmentation.")
+        return {
+            "filename": filename,
+            "content_type": content_type,
+            "duration_seconds": round(original_duration, 2),
+            "segments": [],
+            "status": "No clear active music region detected.",
+        }
+
+    # Slice out only the active region for analysis.
+    start_sample = int(active_start_s * sr)
+    end_sample = int(active_end_s * sr)
+    y_active = y[start_sample:end_sample]
+
+    # --- 2) Extract chroma on active region ---
+    logger.info("Extracting chroma features (active region only)...")
+    chroma_features = _extract_chroma_features(y_active, sr)
+    logger.info(f"Chroma shape (n_chroma, n_frames): {chroma_features.shape}")
+
+    if DOWNSAMPLE_FACTOR > 1:
+        chroma_features_ds = chroma_features[:, ::DOWNSAMPLE_FACTOR]
+    else:
+        chroma_features_ds = chroma_features
+
+    effective_hop_length = CQT_HOP_LENGTH * DOWNSAMPLE_FACTOR
+    logger.info(
+        f"Downsampled chroma shape: {chroma_features_ds.shape}, "
+        f"effective_hop_length={effective_hop_length}"
+    )
+
+    # --- 3) SSM & novelty ---
+    logger.info("Computing self-similarity matrix...")
+    ssm = _compute_ssm(chroma_features_ds)
+    logger.info(f"SSM shape: {ssm.shape}")
+
+    logger.info("Computing novelty curve and finding boundaries...")
+    frames_per_second = sr / effective_hop_length
+    kernel_size_frames = int(NOVELTY_KERNEL_SIZE_SECONDS * frames_per_second)
+    kernel_size_frames = max(1, min(kernel_size_frames, MAX_KERNEL_BLOCK_SIZE))
+
+    novelty_curve = _compute_novelty_curve(ssm, kernel_size_frames=kernel_size_frames)
+    boundaries_core = _find_boundaries(
+        novelty_curve,
+        sr=sr,
+        hop_length=effective_hop_length,
+        min_segment_duration_s=MIN_SEGMENT_DURATION_SECONDS,
+    )
+    logger.info(f"Detected {len(boundaries_core)} boundaries inside active region.")
+
+    # --- 4) Cluster & label segments in active region ---
+    logger.info("Clustering and labeling segments...")
+    segments_core = _cluster_and_label_segments(
+        chroma_features_ds,
+        boundaries_core,
+        sr,
+        effective_hop_length,
+        N_CLUSTERS,
+        total_duration=core_duration,
+    )
+
+    # --- 5) Shift times back to original timeline ---
+    for seg in segments_core:
+        seg["start"] = round(seg["start"] + active_start_s, 2)
+        seg["end"] = round(seg["end"] + active_start_s, 2)
+
+    logger.info(f"Successfully processed {filename}")
+
+    return {
+        "filename": filename,
+        "content_type": content_type,
+        "duration_seconds": round(original_duration, 2),
+        "segments": segments_core,
+        "status": "Segmentation and labeling complete.",
+    }

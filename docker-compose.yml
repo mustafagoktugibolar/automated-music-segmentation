@@ -1,95 +1,143 @@
+# This file is auto-generated from deployment.json. DO NOT EDIT MANUALLY.
 services:
-  # PostgreSQL Service
-  db:
-    image: postgres:18-alpine
+  music_segmentation_db:
     container_name: music_segmentation_db
+    image: postgres:18-alpine
+    ports:
+      - ${DB_PORT}:${DB_PORT}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
-      - "${DB_PORT}:${DB_PORT}"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "5050:80"
+    depends_on:
+      - music_segmentation_db
 
-  # RabbitMQ Service
-  rabbitmq:
-    image: rabbitmq:3-management
+  music_segmentation_rabbitmq:
     container_name: music_segmentation_rabbitmq
+    image: rabbitmq:3-management
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - 5672:5672
+      - 15672:15672
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
       interval: 10s
       timeout: 5s
       retries: 5
-  # Backend (FastAPI)
-  backend:
+  music_segmentation_backend:
+    container_name: music_segmentation_backend
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: music_segmentation_backend
     ports:
-      - "8000:8000"
+      - 8000:8000
     volumes:
       - ./backend:/app/backend
+      - ./shared:/app/shared
+      - ./frontend:/app/frontend
+      - ./logs:/app/logs
+      - media_data:/app/media
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: music_segmentation_backend
+    depends_on:
+      - music_segmentation_db
+      - music_segmentation_rabbitmq
+  worker-custom-1:
+    container_name: worker-custom-1
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
       - ./shared:/app/shared
       - ./logs:/app/logs
       - media_data:/app/media
     env_file:
       - ./.env
     environment:
-      - SERVICE_NAME=segmentation-api
+      SERVICE_NAME: worker-custom-1
+      WORKER_TYPE: custom_segmentation
+      MESSAGE_CODE: segmentation.custom
     depends_on:
-      - db
-      - rabbitmq
-  # Worker: Custom Segmentation
-  # worker-custom:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   container_name: music_segmentation_worker_custom
-  #   volumes:
-  #     - ./workers:/app/workers
-  #     - ./shared:/app/shared
-  #     - ./logs:/app/logs
-  #     - media_data:/app/media
-  #   env_file:
-  #     - ./.env
-  #   environment:
-  #     - SERVICE_NAME=worker-custom
-  #     - WORKER_TYPE=custom_segmentation
-  #   depends_on:
-  #     - rabbitmq
-
-  # Worker: MSAF Segmentation (Scaled)
-  # worker-msaf:
-  #   build:
-  #     context: .
-  #     dockerfile: workers/Dockerfile
-  #   # container_name: Sabit isim kullanamayız çünkü scale edilecek
-  #   deploy:
-  #     replicas: 3
-  #   volumes:
-  #     - ./workers:/app/workers
-  #     - ./shared:/app/shared
-  #     - ./logs:/app/logs
-  #     - media_data:/app/media
-  #   env_file:
-  #     - ./.env
-  #   environment:
-  #     - SERVICE_NAME=worker-msaf
-  #     - WORKER_TYPE=msaf_segmentation
-  #   depends_on:
-  #     - rabbitmq
-
+      - music_segmentation_rabbitmq
+  worker-msaf-foote:
+    container_name: worker-msaf-foote
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+      - media_data:/app/media
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: worker-msaf-foote
+      WORKER_TYPE: msaf_segmentation
+      MESSAGE_CODE: segmentation.foote
+      MSAF_ALGORITHM: foote
+    depends_on:
+      - music_segmentation_rabbitmq
+  worker-msaf-cnmf:
+    container_name: worker-msaf-cnmf
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+      - media_data:/app/media
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: worker-msaf-cnmf
+      WORKER_TYPE: msaf_segmentation
+      MESSAGE_CODE: segmentation.cnmf
+      MSAF_ALGORITHM: cnmf
+    depends_on:
+      - music_segmentation_rabbitmq
+  worker-msaf-scluster:
+    container_name: worker-msaf-scluster
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+      - media_data:/app/media
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: worker-msaf-scluster
+      WORKER_TYPE: msaf_segmentation
+      MESSAGE_CODE: segmentation.scluster
+      MSAF_ALGORITHM: scluster
+    depends_on:
+      - music_segmentation_rabbitmq
 volumes:
-  postgres_data:
-  rabbitmq_data:
-  media_data:
+  postgres_data: null
+  rabbitmq_data: null
+  media_data: null

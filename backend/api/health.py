@@ -29,7 +29,7 @@ def health_db(request: Request):
         db_ok = ping_db(request)
     except Exception as e:
         db_ok = False
-        logger.error("Database health check failed.", exception=e)
+        logger.error("Database health check failed.", exc_info=True)
 
     return {"db_ok": db_ok}
 

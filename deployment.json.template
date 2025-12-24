@@ -1,0 +1,175 @@
+{
+  "services": [
+    {
+      "name": "music_segmentation_db",
+      "type": "postgres",
+      "image": "postgres:16-alpine",
+      "ports": [
+        "${DB_PORT}:${DB_PORT}"
+      ],
+      "volumes": [
+        "postgres_data:/var/lib/postgresql/data"
+      ],
+      "environment": {
+        "POSTGRES_USER": "${DB_USER}",
+        "POSTGRES_PASSWORD": "${DB_PASSWORD}",
+        "POSTGRES_DB": "${DB_NAME}"
+      }
+    },
+    {
+      "name": "music_segmentation_rabbitmq",
+      "type": "rabbitmq",
+      "image": "rabbitmq:3-management",
+      "ports": [
+        "5672:5672",
+        "15672:15672"
+      ],
+      "volumes": [
+        "rabbitmq_data:/var/lib/rabbitmq"
+      ],
+      "environment": {
+        "RABBITMQ_DEFAULT_USER": "guest",
+        "RABBITMQ_DEFAULT_PASS": "guest"
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "rabbitmq-diagnostics",
+          "-q",
+          "ping"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 5
+      }
+    },
+    {
+      "name": "music_segmentation_backend",
+      "type": "api",
+      "build": {
+        "context": ".",
+        "dockerfile": "backend/Dockerfile"
+      },
+      "ports": [
+        "8000:8000"
+      ],
+      "volumes": [
+        "./backend:/app/backend",
+        "./shared:/app/shared",
+        "./logs:/app/logs",
+        "media_data:/app/media"
+      ],
+      "env_file": [
+        "./.env"
+      ],
+      "environment": {
+        "SERVICE_NAME": "music_segmentation_backend"
+      },
+      "depends_on": [
+        "music_segmentation_db",
+        "music_segmentation_rabbitmq"
+      ]
+    },
+    {
+      "name": "worker-custom-1",
+      "type": "worker",
+      "build": {
+        "context": ".",
+        "dockerfile": "workers/Dockerfile"
+      },
+      "volumes": [
+        "./workers:/app/workers",
+        "./shared:/app/shared",
+        "./logs:/app/logs",
+        "media_data:/app/media"
+      ],
+      "env_file": [
+        "./.env"
+      ],
+      "environment": {
+        "SERVICE_NAME": "worker-custom-1",
+        "WORKER_TYPE": "custom_segmentation"
+      },
+      "depends_on": [
+        "music_segmentation_rabbitmq"
+      ]
+    },
+    {
+      "name": "worker-msaf-1",
+      "type": "worker",
+      "build": {
+        "context": ".",
+        "dockerfile": "workers/Dockerfile"
+      },
+      "volumes": [
+        "./workers:/app/workers",
+        "./shared:/app/shared",
+        "./logs:/app/logs",
+        "media_data:/app/media"
+      ],
+      "env_file": [
+        "./.env"
+      ],
+      "environment": {
+        "SERVICE_NAME": "worker-msaf-1",
+        "WORKER_TYPE": "msaf_segmentation"
+      },
+      "depends_on": [
+        "music_segmentation_rabbitmq"
+      ]
+    },
+    {
+      "name": "worker-msaf-2",
+      "type": "worker",
+      "build": {
+        "context": ".",
+        "dockerfile": "workers/Dockerfile"
+      },
+      "volumes": [
+        "./workers:/app/workers",
+        "./shared:/app/shared",
+        "./logs:/app/logs",
+        "media_data:/app/media"
+      ],
+      "env_file": [
+        "./.env"
+      ],
+      "environment": {
+        "SERVICE_NAME": "worker-msaf-2",
+        "WORKER_TYPE": "msaf_segmentation"
+      },
+      "depends_on": [
+        "music_segmentation_rabbitmq"
+      ]
+    },
+    {
+      "name": "worker-msaf-3",
+      "type": "worker",
+      "build": {
+        "context": ".",
+        "dockerfile": "workers/Dockerfile"
+      },
+      "volumes": [
+        "./workers:/app/workers",
+        "./shared:/app/shared",
+        "./logs:/app/logs",
+        "media_data:/app/media"
+      ],
+      "env_file": [
+        "./.env"
+      ],
+      "environment": {
+        "SERVICE_NAME": "worker-msaf-3",
+        "WORKER_TYPE": "msaf_segmentation"
+      },
+      "depends_on": [
+        "music_segmentation_rabbitmq"
+      ]
+    }
+  ],
+  "volumes": {
+    "postgres_data": null,
+    "rabbitmq_data": null,
+    "media_data": null
+  }
+}
