@@ -1,5 +1,4 @@
-import json
-import asyncio
+import threading
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 from shared.rabbitmq import RabbitMQClient
@@ -13,12 +12,9 @@ class ResultListener:
     def __init__(self):
         self.rabbitmq = RabbitMQClient(service_name="result-listener")
         
-        # We need a separate synchronous engine/session mechanism here or reuse the one from app
-        # For simplicity in this service loop, we'll create a new engine connection
         db_settings = DBSettings
         self.engine = create_engine(db_settings.DB_URL)
         
-        # Ensure tables exist (quick hack for dev, usually done via Alembic)
         Base.metadata.create_all(bind=self.engine)
 
     def start(self):
@@ -29,7 +25,7 @@ class ResultListener:
         """
         logger.info("Starting Result Listener...")
         # We use a separate thread usually, but for consuming we can use the blocking consume in a thread
-        import threading
+
         t = threading.Thread(target=self._consume_loop, daemon=True)
         t.start()
 
@@ -56,25 +52,21 @@ class ResultListener:
                 task = session.query(SegmentationTask).filter(SegmentationTask.task_id == task_id).first()
                 
                 if not task:
-                    # If task doesn't exist (e.g. first result arrived), create it
-                    # Note: Ideally the upload endpoint creates the task with 'pending' status first.
-                    # But if we lazy create:
                     task = SegmentationTask(task_id=task_id, status="processing")
                     session.add(task)
                 
-                # Update results
                 current_results = dict(task.results) if task.results else {}
                 current_results[key] = segments
                 
                 task.results = current_results
                 
-                # Check for completion
                 expected = set(task.expected_algorithms or [])
                 received = set(current_results.keys())
                 
                 if expected and expected.issubset(received):
                     task.status = "completed"
                     logger.info(f"Task {task_id} COMPLETED. All expected results received: {received}")
+                    # TODO: Remove the audio file from the upload directory
                 else:
                     task.status = "processing"
                     logger.info(f"Task {task_id} processing. Received: {received}, Expected: {expected}")
@@ -82,7 +74,6 @@ class ResultListener:
                 session.commit()
                 logger.info(f"Updated DB for task {task_id}")
 
-            # Ack
             ch.basic_ack(delivery_tag=method.delivery_tag)
             
         except Exception as e:

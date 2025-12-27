@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import json
 import signal
 import sys
 from shared.rabbitmq import RabbitMQClient
@@ -46,7 +45,7 @@ class BaseWorker(ABC):
             
         except Exception as e:
             logger.error(f"[{self.service_name}] Task processing failed", exc_info=True)
-            # Negative acknowledgement (requeue=False -> dead letter or discard)
+            # Negative acknowledgement TODO: (requeue=False -> dead letter or discard)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
     def start(self):

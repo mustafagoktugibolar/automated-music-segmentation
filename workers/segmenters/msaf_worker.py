@@ -1,18 +1,6 @@
 import os
-import numpy as np
-import scipy.signal
-import scipy.signal.windows
-
-# Monkey patch: scipy 1.13+ removed scipy.inf, but msaf relies on it.
-if not hasattr(scipy, 'inf'):
-    scipy.inf = np.inf
-
-# Monkey patch for scipy.signal.gaussian
-if not hasattr(scipy.signal, 'gaussian'):
-    scipy.signal.gaussian = scipy.signal.windows.gaussian
-
 import msaf
-from workers.base import BaseWorker
+from workers.BaseWorker import BaseWorker
 from shared.logger import get_logger
 
 logger = get_logger()
