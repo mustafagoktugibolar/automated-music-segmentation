@@ -1,8 +1,8 @@
 import os
 import sys
 from shared.logger import get_logger
-from workers.msaf_worker import MSAFWorker
-from workers.custom_worker import CustomWorker
+from workers.segmenters.msaf_worker import MSAFWorker
+from workers.segmenters.custom_worker import CustomWorker
 
 logger = get_logger()
 

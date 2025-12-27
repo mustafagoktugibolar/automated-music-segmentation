@@ -3,7 +3,6 @@ from collections import Counter
 
 import librosa
 import numpy as np
-# from fastapi import UploadFile  <-- Removed
 from scipy.signal import correlate2d
 from scipy.ndimage import gaussian_filter1d
 from sklearn.cluster import KMeans
