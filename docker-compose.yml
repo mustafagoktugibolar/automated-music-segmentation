@@ -64,6 +64,7 @@ services:
       - music_segmentation_rabbitmq
   worker-custom-1:
     container_name: worker-custom-1
+    image: music-segmentation-worker:latest
     build:
       context: .
       dockerfile: workers/Dockerfile
@@ -82,9 +83,8 @@ services:
       - music_segmentation_rabbitmq
   worker-msaf-foote:
     container_name: worker-msaf-foote
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
+    image: music-segmentation-worker:latest
+
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
@@ -101,9 +101,8 @@ services:
       - music_segmentation_rabbitmq
   worker-msaf-cnmf:
     container_name: worker-msaf-cnmf
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
+    image: music-segmentation-worker:latest
+
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
@@ -120,9 +119,8 @@ services:
       - music_segmentation_rabbitmq
   worker-msaf-scluster:
     container_name: worker-msaf-scluster
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
+    image: music-segmentation-worker:latest
+
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
