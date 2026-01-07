@@ -6,14 +6,10 @@ dependencies:
   - python=3.12
   - fastapi
   - uvicorn
-  - ffmpeg
-  - librosa
-  - numpy
-  - scipy
-  - numba
   - SQLAlchemy
   - psycopg2-binary
   - pydantic-settings
-  - pip
-  - pip:
-    - soundfile
+  - pika
+  - pyyaml
+  - aiofiles
+  - python-multipart
