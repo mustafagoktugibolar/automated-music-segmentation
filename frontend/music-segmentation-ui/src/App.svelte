@@ -416,10 +416,10 @@
           <div class="mt-6 grid gap-4 lg:grid-cols-2">
             {#each Object.keys(results) as algo}
               <details
-                class="group rounded-2xl border border-zinc-800 bg-zinc-950"
+                class="group self-start rounded-2xl border border-zinc-800 bg-zinc-950"
               >
                 <summary
-                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3"
+                  class="flex self-start cursor-pointer list-none items-center justify-between gap-3 px-4 py-3"
                 >
                   <div class="flex items-center gap-3">
                     <div class="h-2 w-2 rounded-full bg-indigo-400/80"></div>
