@@ -1,0 +1,3 @@
+[submodule "data/salami"]
+	path = data/salami
+	url = https://github.com/DDMAL/salami-data-public
