@@ -58,7 +58,7 @@
   function allRequestedResultsPresent() {
     if (requested.length === 0) return false;
     return requested.every((a) =>
-      Object.prototype.hasOwnProperty.call(results, a)
+      Object.prototype.hasOwnProperty.call(results, a),
     );
   }
 
@@ -177,10 +177,10 @@
 
   <div class="mx-auto max-w-5xl px-4 py-10">
     <!-- Header -->
-    <header class="mb-8 flex flex-col gap-2">
+    <header class="mb-8 flex flex-col items-center gap-2">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <h1 class="text-3xl font-semibold tracking-tight">
+          <h1 class="text-3xl text-center font-semibold tracking-tight">
             Music Segmentation
           </h1>
           <p class="mt-1 text-sm text-zinc-400">
