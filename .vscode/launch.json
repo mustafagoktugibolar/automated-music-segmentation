@@ -6,10 +6,29 @@
             "type": "debugpy",
             "request": "launch",
             "module": "backend.main",
-            "env": { "APP_ENV": "dev" },
+            "env": {
+                "APP_ENV": "dev"
+            },
             "envFile": "${workspaceFolder}/.env.dev",
             "jinja": true,
-            "justMyCode": true
+            "justMyCode": true,
+            "python": "/opt/miniconda3/envs/music-segmentation-env/bin/python"
+        },
+        {
+            "name": "music-segmentation-debugger (Sync Data)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "backend.main",
+            "args": [
+                "--sync-data"
+            ],
+            "env": {
+                "APP_ENV": "dev"
+            },
+            "envFile": "${workspaceFolder}/.env.dev",
+            "jinja": true,
+            "justMyCode": true,
+            "python": "/opt/miniconda3/envs/music-segmentation-env/bin/python"
         }
     ]
 }

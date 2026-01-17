@@ -8,7 +8,7 @@ from backend.db.postgreSQL import SessionLocal
 
 logger = get_logger()
 
-UPLOAD_DIR = "/app/media/uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "media/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 class SegmentationOrchestrator:
@@ -25,7 +25,7 @@ class SegmentationOrchestrator:
         """
         Orchestrates the upload process:
         1. Validates algorithms
-        2. Saves file to disk
+        2. Saves file to disk or get file from azure blob storage from path TODO!
         3. Creates DB record
         4. Publishes tasks to RabbitMQ
         Returns: task_id (str)
