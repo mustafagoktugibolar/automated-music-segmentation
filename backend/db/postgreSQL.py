@@ -27,10 +27,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def prepare_db_connection(conn) -> None:
     conn.autocommit = False
     with conn.cursor() as cursor:
-        # we must give a tuple to the execute method
-        timeout_tuple = (STMT_TIMEOUT_MS,)
         cursor.execute("SET application_name = %s;", ("fastapi-app",))
-        cursor.execute("SET statement_timeout = %s;", (timeout_tuple))
+        cursor.execute("SET statement_timeout = %s;", (str(STMT_TIMEOUT_MS),))
         logger.info(f"Prepared database connection with {STMT_TIMEOUT_MS} statement_timeout.")
 
 
@@ -42,7 +40,7 @@ async def init_db_pool(app: FastAPI):
     pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
     last_exc: Optional[Exception] = None
     
-    for attempt in range(RETRY_COUNT):
+    for attempt in range(1, RETRY_COUNT + 1):
         try:
             logger.info(f"[DB] Creating pool attempt {attempt}/{RETRY_COUNT} ...")
             pool = ThreadedConnectionPool(

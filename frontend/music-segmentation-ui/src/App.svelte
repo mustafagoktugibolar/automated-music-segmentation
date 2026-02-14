@@ -1,7 +1,6 @@
 <script>
   import { onDestroy } from "svelte";
-  import { uploadSegmentation, fetchStatus } from "./lib/api";
-  import { createPoller } from "./lib/polling";
+  import { uploadSegmentation, fetchStatus, subscribeToTask } from "./lib/api";
   import { Button } from "src/lib/components/ui/button";
   import * as Card from "src/lib/components/ui/card";
   import {
@@ -34,7 +33,7 @@
   let results = {};
   let rawStatus = {};
 
-  const poller = createPoller({ intervalMs: 3000, timeoutMs: 10 * 60 * 1000 });
+  let unsubscribe = null;
 
   function toggleAlgo(id) {
     const next = new Set(selected);
@@ -44,6 +43,10 @@
   }
 
   function resetRunState() {
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
     taskId = "";
     status = "idle";
     statusText = "";
@@ -52,7 +55,6 @@
     results = {};
     rawStatus = {};
     isUploading = false;
-    poller.stop();
   }
 
   function allRequestedResultsPresent() {
@@ -85,7 +87,9 @@
       return;
     }
 
-    poller.stop();
+    if (unsubscribe) {
+      unsubscribe();
+    }
     results = {};
     rawStatus = {};
     requested = algos;
@@ -99,53 +103,46 @@
 
       isUploading = false;
       status = "processing";
-      statusText = `Task ${taskId} — processing (polling every 3s)`;
+      statusText = `Task ${taskId} — processing (waiting for results)`;
 
-      poller.start(async () => {
-        try {
-          const data = await fetchStatus(taskId);
-          rawStatus = data;
+      // Use SSE instead of polling
+      console.log("Subscribing to SSE for task:", taskId);
+      unsubscribe = subscribeToTask(taskId, (data) => {
+        console.log("SSE received data:", data);
+        rawStatus = data;
+        results = { ...results, ...(data.results || {}) };
 
-          results = { ...results, ...(data.results || {}) };
-
-          if (data.status === "completed" || allRequestedResultsPresent()) {
-            status = "completed";
-            statusText = "Completed.";
-            poller.stop();
-            return;
+        if (data.status === "completed" || allRequestedResultsPresent()) {
+          console.log("Task completed!");
+          status = "completed";
+          statusText = "Completed.";
+          if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
           }
-
-          if (data.status === "failed") {
-            status = "error";
-            errorMsg = data.error || "Backend reported failure.";
-            statusText = "Failed.";
-            poller.stop();
-            return;
+        } else if (data.status === "failed") {
+          console.log("Task failed!");
+          status = "error";
+          errorMsg = data.error || "Backend reported failure.";
+          statusText = "Failed.";
+          if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
           }
-
-          if (poller.elapsedMs() > poller.timeoutMs) {
-            status = "timeout";
-            statusText = "Timed out waiting for results.";
-            poller.stop();
-            return;
-          }
-
-          status = "processing";
-        } catch (err) {
-          // Don’t kill the whole run for a transient polling hiccup.
-          statusText = `Polling… (last error: ${err.message})`;
         }
       });
+      console.log("SSE subscribed, waiting for results...");
     } catch (err) {
       isUploading = false;
       status = "error";
       errorMsg = err.message;
       statusText = "Error.";
-      poller.stop();
     }
   }
 
-  onDestroy(() => poller.stop());
+  onDestroy(() => {
+    if (unsubscribe) unsubscribe();
+  });
 
   function prettyBytes(bytes) {
     if (!bytes && bytes !== 0) return "";
@@ -395,8 +392,7 @@
           </div>
 
           <div class="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
-            <span class="rounded-full bg-zinc-800 px-2 py-1">poll: 3s</span>
-            <span class="rounded-full bg-zinc-800 px-2 py-1">timeout: 10m</span>
+            <span class="rounded-full bg-zinc-800 px-2 py-1">SSE</span>
           </div>
         </div>
 

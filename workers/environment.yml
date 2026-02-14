@@ -12,3 +12,6 @@ dependencies:
   - pip:
     - msaf[all]
     - librosa
+    - portalocker
+    - azure-storage-blob
+    - azure-core

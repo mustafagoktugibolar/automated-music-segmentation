@@ -11,6 +11,11 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
@@ -60,8 +65,10 @@ services:
     environment:
       SERVICE_NAME: music_segmentation_backend
     depends_on:
-      - music_segmentation_db
-      - music_segmentation_rabbitmq
+      music_segmentation_db:
+        condition: service_healthy
+      music_segmentation_rabbitmq:
+        condition: service_healthy
   worker-custom-1:
     container_name: worker-custom-1
     image: music-segmentation-worker:latest

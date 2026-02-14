@@ -123,8 +123,8 @@ def _load_audio_from_bytes(content: bytes, sr: int | None = None) -> tuple[np.nd
         audio_stream = io.BytesIO(content)
         y, sr = librosa.load(audio_stream, sr=sr)
         return y, sr
-    except Exception as e:
-        logger.error("Failed to load audio from bytes.", exc_info=e)
+    except Exception:
+        logger.error("Failed to load audio from bytes.", exc_info=True)
         raise
 
 
@@ -400,6 +400,7 @@ def _cluster_and_label_segments(
     sr: int,
     hop_length: int,
     n_clusters: int,
+    min_segment_duration_seconds: float,
     total_duration: float,
 ) -> list[dict]:
     """
@@ -489,7 +490,7 @@ def _cluster_and_label_segments(
 
     merged_segments = _enforce_min_segment_duration(
         merged_segments,
-        MIN_SEGMENT_DURATION_SECONDS,
+        min_segment_duration_seconds,
         total_duration,
     )
 
@@ -506,7 +507,7 @@ def _cluster_and_label_segments(
 # Main entrypoints
 # -------------------------------------------------------------------------
 
-def process_file_path(file_path: str):
+def process_file_path(file_path: str, params: dict | None = None):
     """
     Worker-friendly entry point. Reads file from disk.
     """
@@ -518,17 +519,31 @@ def process_file_path(file_path: str):
         filename = file_path.split("/")[-1]
         
         # Reuse the core logic by passing content bytes
-        return _analyze_content(content, filename)
-    except Exception as e:
-        logger.error(f"Error processing file path {file_path}", exc_info=e)
-        raise e
+        return _analyze_content(content, filename, params=params)
+    except Exception:
+        logger.error(f"Error processing file path {file_path}", exc_info=True)
+        raise
 
 
-def _analyze_content(content: bytes, filename: str, content_type: str = "audio/wav"):
+def _analyze_content(
+    content: bytes,
+    filename: str,
+    content_type: str = "audio/wav",
+    params: dict | None = None,
+):
     """
     Shared core logic for segmentation.
     """
     y, sr = _load_audio_from_bytes(content)
+    params = params or {}
+
+    min_segment_duration_seconds = float(
+        params.get("min_segment_duration_seconds", MIN_SEGMENT_DURATION_SECONDS)
+    )
+    novelty_kernel_size_seconds = float(
+        params.get("novelty_kernel_size_seconds", NOVELTY_KERNEL_SIZE_SECONDS)
+    )
+    n_clusters = int(params.get("n_clusters", N_CLUSTERS))
 
     original_duration = librosa.get_duration(y=y, sr=sr)
     logger.info(f"Loaded audio: sr={sr}, original_duration≈{original_duration:.2f}s")
@@ -586,7 +601,7 @@ def _analyze_content(content: bytes, filename: str, content_type: str = "audio/w
 
     logger.info("Computing novelty curve and finding boundaries...")
     frames_per_second = sr / effective_hop_length
-    kernel_size_frames = int(NOVELTY_KERNEL_SIZE_SECONDS * frames_per_second)
+    kernel_size_frames = int(novelty_kernel_size_seconds * frames_per_second)
     kernel_size_frames = max(1, min(kernel_size_frames, MAX_KERNEL_BLOCK_SIZE))
 
     novelty_curve = _compute_novelty_curve(ssm, kernel_size_frames=kernel_size_frames)
@@ -594,7 +609,7 @@ def _analyze_content(content: bytes, filename: str, content_type: str = "audio/w
         novelty_curve,
         sr=sr,
         hop_length=effective_hop_length,
-        min_segment_duration_s=MIN_SEGMENT_DURATION_SECONDS,
+        min_segment_duration_s=min_segment_duration_seconds,
     )
     logger.info(f"Detected {len(boundaries_core)} boundaries inside active region.")
 
@@ -605,7 +620,8 @@ def _analyze_content(content: bytes, filename: str, content_type: str = "audio/w
         boundaries_core,
         sr,
         effective_hop_length,
-        N_CLUSTERS,
+        n_clusters,
+        min_segment_duration_seconds=min_segment_duration_seconds,
         total_duration=core_duration,
     )
 

@@ -4,7 +4,7 @@ This project is an automated music segmentation tool.
 
 ## Getting Started
 
-This project uses Docker and Docker Compose to manage all its services, including the backend API and the PostgreSQL database.
+This project uses Docker and Docker Compose to manage all services, including backend API, workers, PostgreSQL, and RabbitMQ.
 
 ### Prerequisites
 
@@ -45,12 +45,30 @@ The entire application stack (backend + database) is managed by Docker Compose.
     ```bash
     docker-compose ps
     ```
-    You should see both `music_segmentation_db` and `music_segmentation_backend` with a status of "running" or "Up".
+    You should see `music_segmentation_db`, `music_segmentation_backend`, and worker/rabbitmq services with a status of "running" or "Up".
 
 3.  **Access the API**
 
-    Once the services are running, the API will be available at `http://localhost:8000`. You can test it by navigating to the health check endpoint:
-    `http://localhost:8000/probe`
+    Once the services are running, the API will be available at `http://localhost:8000`. You can test it by navigating to:
+    `http://localhost:8000/health`
+
+## API Endpoints
+
+- `POST /segmentation/upload`  
+  Uploads an audio file and dispatches segmentation jobs.  
+  Multipart fields:
+  - `file`: audio file
+  - `algorithms`: JSON list string (default: `["custom","foote","cnmf","scluster"]`)
+  - `params`: optional JSON string with typed worker parameters
+
+- `POST /segmentation/from-storage`  
+  Runs segmentation for an existing storage song by `song_id`.
+
+- `GET /songs`  
+  Lists available songs from Azure Blob storage as `{ song_id, blob_name }`.
+
+- `GET /segmentation/status/{task_id}`  
+  Returns task status and collected per-algorithm results.
 
 ### Viewing Logs
 
