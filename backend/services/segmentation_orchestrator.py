@@ -1,15 +1,28 @@
 import os
 import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
 import aiofiles
-from shared.logger import get_logger
-from shared.rabbitmq import RabbitMQClient
+
+from backend.api.schemas import ALLOWED_ALGORITHMS, SegmentationParams
 from backend.db.models import SegmentationTask
 from backend.db.postgreSQL import SessionLocal
+from shared.blob_helper import AzureBlobCacheHelper
+from shared.logger import get_logger
+from shared.rabbitmq import RabbitMQClient
 
 logger = get_logger()
 
-UPLOAD_DIR = "/app/media/uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "media/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+@dataclass
+class SongInfo:
+    song_id: str
+    url: str
+
 
 class SegmentationOrchestrator:
     def __init__(self):
@@ -18,28 +31,111 @@ class SegmentationOrchestrator:
             "custom": "segmentation.custom",
             "foote": "segmentation.foote",
             "cnmf": "segmentation.cnmf",
-            "scluster": "segmentation.scluster"
+            "scluster": "segmentation.scluster",
+            "user_code": "segmentation.user_code",
         }
+        self._blob_helper = None
 
-    async def process_upload(self, file, requested_algos: list[str]) -> str:
-        """
-        Orchestrates the upload process:
-        1. Validates algorithms
-        2. Saves file to disk
-        3. Creates DB record
-        4. Publishes tasks to RabbitMQ
-        Returns: task_id (str)
-        """
-        target_keys = []
+    @property
+    def azure_container(self) -> str:
+        container = os.getenv("AZURE_STORAGE_CONTAINER_RAW", "").strip()
+        if not container:
+            raise RuntimeError("AZURE_STORAGE_CONTAINER_RAW is not configured")
+        return container
+
+    def _get_blob_helper(self) -> AzureBlobCacheHelper:
+        if self._blob_helper is None:
+            self._blob_helper = AzureBlobCacheHelper()
+        return self._blob_helper
+
+    def _normalize_algorithms(self, requested_algos: list[str]) -> list[str]:
+        normalized: list[str] = []
         for algo in requested_algos:
-            key = self.algo_to_routing_key.get(algo.lower())
-            if key:
-                target_keys.append(key)
+            candidate = str(algo).lower().strip()
+            if candidate in ALLOWED_ALGORITHMS and candidate not in normalized:
+                normalized.append(candidate)
             else:
-                logger.warning(f"Unknown algorithm requested: {algo}")
+                logger.warning(f"Unknown or duplicate algorithm requested: {algo}")
 
-        if not target_keys:
+        if not normalized:
             raise ValueError("No valid algorithms specified.")
+
+        return normalized
+
+    def _validate_and_trim_params(self, params: SegmentationParams | None, algorithms: list[str]) -> dict:
+        payload = params.model_dump(exclude_none=True) if params else {}
+        if not payload:
+            return {}
+
+        if "custom" in payload and "custom" not in algorithms:
+            logger.warning("Ignoring custom params because custom algorithm was not requested")
+            payload.pop("custom", None)
+
+        msaf_requested = any(a in {"foote", "cnmf", "scluster"} for a in algorithms)
+        if "msaf" in payload and not msaf_requested:
+            logger.warning("Ignoring msaf params because no MSAF algorithm was requested")
+            payload.pop("msaf", None)
+
+        return payload
+
+    def _create_task_record(
+        self,
+        *,
+        task_id: str,
+        filename: str,
+        expected_algorithms: list[str],
+        source_type: str,
+        source_song_id: str | None,
+        requested_params: dict,
+        webhook_url: str | None = None,
+    ) -> None:
+        db = SessionLocal()
+        try:
+            new_task = SegmentationTask(
+                task_id=task_id,
+                filename=filename,
+                status="processing",
+                results={},
+                expected_algorithms=[a.lower() for a in expected_algorithms],
+                source_type=source_type,
+                source_song_id=source_song_id,
+                requested_params=requested_params or None,
+                webhook_url=webhook_url,
+            )
+            db.add(new_task)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.error("Failed to save initial task to DB", exc_info=True)
+            raise RuntimeError("Database error during task creation")
+        finally:
+            db.close()
+
+    def _publish_tasks(self, task_payload: dict, algorithms: list[str]) -> None:
+        target_keys = [self.algo_to_routing_key[a] for a in algorithms]
+        logger.info(f"Distributing tasks for {task_payload['task_id']} to workers: {target_keys}")
+        for key in target_keys:
+            self.rabbitmq.publish(
+                exchange="segmentation_topic",
+                routing_key=key,
+                message=task_payload,
+            )
+
+    def list_available_songs(self) -> list[SongInfo]:
+        from backend.services.dataset_worker import get_available_songs
+        
+        songs_data = get_available_songs()
+        songs: list[SongInfo] = []
+
+        for s in songs_data:
+            songs.append(SongInfo(song_id=s.song_id, url=s.archive_path))
+
+        songs.sort(key=lambda s: s.song_id)
+        return songs
+
+    async def process_upload(self, file, requested_algos: list[str], params: SegmentationParams | None = None, webhook_url: str | None = None) -> str:
+        algorithms = self._normalize_algorithms(requested_algos)
+        effective_params = self._validate_and_trim_params(params, algorithms)
 
         task_id = str(uuid.uuid4())
         filename = f"{task_id}_{file.filename}"
@@ -47,48 +143,78 @@ class SegmentationOrchestrator:
 
         try:
             logger.info(f"Saving uploaded file to {file_path}")
-            async with aiofiles.open(file_path, 'wb') as out_file:
+            async with aiofiles.open(file_path, "wb") as out_file:
                 while content := await file.read(1024 * 1024):
                     await out_file.write(content)
-            
-            try:
-                db = SessionLocal()
-                new_task = SegmentationTask(
-                    task_id=task_id, 
-                    filename=file.filename,
-                    status="processing",
-                    results={},
-                    expected_algorithms=requested_algos
-                )
-                db.add(new_task)
-                db.commit()
-                db.close()
-            except Exception as e:
-                logger.error("Failed to save initial task to DB", exc_info=True)
-                raise RuntimeError("Database error during task creation")
+
+            self._create_task_record(
+                task_id=task_id,
+                filename=file.filename,
+                expected_algorithms=algorithms,
+                source_type="upload",
+                source_song_id=None,
+                requested_params=effective_params,
+                webhook_url=webhook_url,
+            )
 
             task_payload = {
                 "task_id": task_id,
+                "source_type": "upload",
                 "original_filename": file.filename,
                 "file_path": file_path,
-                "content_type": file.content_type
+                "content_type": file.content_type,
+                "algorithms": algorithms,
+                "params": effective_params,
             }
-            
-            logger.info(f"Distributing tasks for {task_id} to workers: {target_keys}")
-            for key in target_keys:
-                self.rabbitmq.publish(
-                    exchange="segmentation_topic",
-                    routing_key=key,
-                    message=task_payload
-                )
-
+            self._publish_tasks(task_payload, algorithms)
             return task_id
 
-        except Exception as e:
-            logger.error(f"Orchestration failed: {e}", exc_info=True)
+        except Exception:
+            logger.error("Orchestration failed for upload flow", exc_info=True)
             if os.path.exists(file_path):
                 try:
                     os.remove(file_path)
-                except:
+                except OSError:
                     pass
-            raise e
+            raise
+
+    async def process_from_storage(
+        self,
+        song_id: str,
+        requested_algos: list[str],
+        params: SegmentationParams | None = None,
+    ) -> str:
+        song_id = song_id.strip()
+        if not song_id:
+            raise ValueError("song_id is required")
+
+        algorithms = self._normalize_algorithms(requested_algos)
+        effective_params = self._validate_and_trim_params(params, algorithms)
+
+        blob_name = f"songs/{song_id}.mp3"
+        helper = self._get_blob_helper()
+        exists = helper.blob_exists(self.azure_container, blob_name)
+        if not exists:
+            raise FileNotFoundError(f"Song not found in storage for song_id={song_id}")
+
+        task_id = str(uuid.uuid4())
+        self._create_task_record(
+            task_id=task_id,
+            filename=f"{song_id}.mp3",
+            expected_algorithms=algorithms,
+            source_type="storage",
+            source_song_id=song_id,
+            requested_params=effective_params,
+        )
+
+        task_payload = {
+            "task_id": task_id,
+            "source_type": "storage",
+            "song_id": song_id,
+            "blob_name": blob_name,
+            "content_type": "audio/mpeg",
+            "algorithms": algorithms,
+            "params": effective_params,
+        }
+        self._publish_tasks(task_payload, algorithms)
+        return task_id

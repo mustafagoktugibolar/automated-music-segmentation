@@ -57,9 +57,9 @@ class DeploymentGenerator:
                 with open(self.config_path, 'w') as f:
                     json.dump(config_data, f, indent=2)
 
-        except Exception as e:
-            logger.error("Failed to write docker-compose.yml", exception=e)
-            raise e
+        except Exception:
+            logger.error("Failed to write docker-compose.yml", exc_info=True)
+            raise
 
 if __name__ == "__main__":
     DeploymentGenerator().generate()

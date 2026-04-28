@@ -1,3 +1,19 @@
+# Generated audio files and uploads
+/data/audio/
+/media/uploads/
+
+# Logs and caches
+/logs/
+/.cache/
+
+# Environment
+.env
+
+# macOS
+.DS_Store
+
+# Node
+/frontend/music-segmentation-ui/node_modules/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

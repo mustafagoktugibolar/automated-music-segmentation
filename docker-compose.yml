@@ -11,6 +11,11 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin
@@ -55,13 +60,16 @@ services:
       - ./frontend:/app/frontend
       - ./logs:/app/logs
       - media_data:/app/media
+      - ./data:/app/data
     env_file:
       - ./.env
     environment:
       SERVICE_NAME: music_segmentation_backend
     depends_on:
-      - music_segmentation_db
-      - music_segmentation_rabbitmq
+      music_segmentation_db:
+        condition: service_healthy
+      music_segmentation_rabbitmq:
+        condition: service_healthy
   worker-custom-1:
     container_name: worker-custom-1
     image: music-segmentation-worker:latest
@@ -84,7 +92,9 @@ services:
   worker-msaf-foote:
     container_name: worker-msaf-foote
     image: music-segmentation-worker:latest
-
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
@@ -102,7 +112,9 @@ services:
   worker-msaf-cnmf:
     container_name: worker-msaf-cnmf
     image: music-segmentation-worker:latest
-
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
@@ -120,7 +132,9 @@ services:
   worker-msaf-scluster:
     container_name: worker-msaf-scluster
     image: music-segmentation-worker:latest
-
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
@@ -135,7 +149,99 @@ services:
       MSAF_ALGORITHM: scluster
     depends_on:
       - music_segmentation_rabbitmq
+  worker-user-code:
+    container_name: worker-user-code
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+      - media_data:/app/media
+      - ./data:/app/data
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: worker-user-code
+      WORKER_TYPE: user_code_segmentation
+      MESSAGE_CODE: segmentation.user_code
+      USER_CODE_TIMEOUT: "30"
+      USER_CODE_MEMORY_BYTES: "2147483648"
+    depends_on:
+      - music_segmentation_rabbitmq
+  worker-dataset:
+    container_name: worker-dataset
+    image: music-segmentation-worker:latest
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+      - media_data:/app/media
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: worker-dataset
+    depends_on:
+      - music_segmentation_rabbitmq
+    command: ["python", "workers/run_dataset.py"]
+  minio:
+    container_name: minio
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  minio_init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: /bin/sh -c
+    command: |
+      "sleep 5;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} || true;
+      mc mb --ignore-existing local/${S3_BUCKET_RAW} || true;"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET_RAW: ${S3_BUCKET_RAW}
+  salami_loader:
+    container_name: salami_dataset_loader
+    build:
+      context: ../salami-dataset-loader
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET_RAW: ${S3_BUCKET_RAW}
+      S3_REGION: ${S3_REGION}
+      STORAGE_PROVIDER: minio
+      DATASET_PREFIX: ${DATASET_PREFIX}
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    restart: "no"
+    command: ["python", "main.py", "--concurrency", "5"]
 volumes:
   postgres_data: null
   rabbitmq_data: null
   media_data: null
+  minio_data: null

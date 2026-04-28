@@ -6,6 +6,7 @@ dependencies:
   - python=3.12
   - fastapi
   - uvicorn
+  - portalocker
   - SQLAlchemy
   - psycopg2-binary
   - pydantic-settings
@@ -13,3 +14,6 @@ dependencies:
   - pyyaml
   - aiofiles
   - python-multipart
+  - azure-storage-blob
+  - pip:
+    - mir_eval

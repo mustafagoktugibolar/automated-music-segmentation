@@ -12,3 +12,11 @@ dependencies:
   - pip:
     - msaf[all]
     - librosa
+    - portalocker
+    - azure-storage-blob
+    - azure-core
+    - pydantic-settings
+    - mir_eval
+    - --extra-index-url https://download.pytorch.org/whl/cpu
+    - torch
+    - torchaudio

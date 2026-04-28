@@ -1,14 +1,16 @@
-# backend/api/health.py
 from fastapi import APIRouter, Request
-from shared.logger import get_logger
-from backend.db.postgreSQL import ping_db
+
 import os
 import platform
 import time
 
+from backend.db.postgreSQL import ping_db
+from shared.logger import get_logger
+
 logger = get_logger()
 router = APIRouter(prefix="/health", tags=["health"])
 START_TIME = time.time()
+
 
 @router.get("/app")
 def health_app():
@@ -27,7 +29,7 @@ def health_app():
 def health_db(request: Request):
     try:
         db_ok = ping_db(request)
-    except Exception as e:
+    except Exception:
         db_ok = False
         logger.error("Database health check failed.", exc_info=True)
 
@@ -40,9 +42,9 @@ def health_root(request: Request):
 
     try:
         db_ok = ping_db(request)
-    except Exception as e:
+    except Exception:
         db_ok = False
-        logger.error("Database check failed in /health.", exception=e)
+        logger.error("Database check failed in /health.", exc_info=True)
 
     return {
         "app_ok": True,
