@@ -88,6 +88,60 @@ class RabbitMQClient:
         logger.info(f"[{self.service_name}] Waiting for messages in {queue_name}...")
         self.channel.start_consuming()
 
+    def rpc_call(self, routing_key: str, message: dict, timeout: int = 30, exchange: str = "segmentation_topic") -> dict:
+        import uuid
+        corr_id = str(uuid.uuid4())
+
+        # Create a fresh connection for RPC thread-safety
+        credentials = pika.PlainCredentials(self.user, self.password)
+        parameters = pika.ConnectionParameters(host=self.host, port=self.port, credentials=credentials)
+        connection = pika.BlockingConnection(parameters)
+        channel = connection.channel()
+
+        result = channel.queue_declare(queue='', exclusive=True)
+        callback_queue = result.method.queue
+
+        response = None
+
+        def on_response(ch, method, props, body):
+            nonlocal response
+            if props.correlation_id == corr_id:
+                try:
+                    response = json.loads(body)
+                except Exception:
+                    response = {"error": "Failed to parse response JSON"}
+
+        channel.basic_consume(
+            queue=callback_queue,
+            on_message_callback=on_response,
+            auto_ack=True
+        )
+
+        channel.basic_publish(
+            exchange=exchange,
+            routing_key=routing_key,
+            properties=pika.BasicProperties(
+                reply_to=callback_queue,
+                correlation_id=corr_id,
+                content_type="application/json"
+            ),
+            body=json.dumps(message)
+        )
+
+        # Wait for response
+        start_time = time.time()
+        while response is None:
+            connection.process_data_events(time_limit=1)
+            if time.time() - start_time > timeout:
+                break
+
+        connection.close()
+
+        if response is None:
+            raise TimeoutError(f"RPC call to {routing_key} timed out after {timeout}s")
+
+        return response
+
     def close(self):
         if self.connection and not self.connection.is_closed:
             self.connection.close()

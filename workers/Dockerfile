@@ -11,6 +11,7 @@ RUN conda env create -f environment.yml
 
 COPY ./workers /app/workers
 COPY ./shared /app/shared
+COPY ./backend /app/backend
 
 # Python path needs to include /app so imports like 'from shared...' work
 ENV PYTHONPATH "${PYTHONPATH}:/app"

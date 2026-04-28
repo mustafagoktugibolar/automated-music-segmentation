@@ -21,7 +21,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @dataclass
 class SongInfo:
     song_id: str
-    blob_name: str
+    url: str
 
 
 class SegmentationOrchestrator:
@@ -32,6 +32,7 @@ class SegmentationOrchestrator:
             "foote": "segmentation.foote",
             "cnmf": "segmentation.cnmf",
             "scluster": "segmentation.scluster",
+            "user_code": "segmentation.user_code",
         }
         self._blob_helper = None
 
@@ -121,25 +122,13 @@ class SegmentationOrchestrator:
             )
 
     def list_available_songs(self) -> list[SongInfo]:
-        helper = self._get_blob_helper()
-        blob_names = helper.list_blobs(self.azure_container, prefix="songs/")
+        from backend.services.dataset_worker import get_available_songs
+        
+        songs_data = get_available_songs()
         songs: list[SongInfo] = []
 
-        for blob_name in blob_names:
-            name = str(blob_name).strip()
-            if not name or not name.lower().startswith("songs/"):
-                continue
-
-            leaf = Path(name).name
-            if Path(leaf).suffix.lower() != ".mp3":
-                logger.warning(f"Skipping non-mp3 blob from songs prefix: {name}")
-                continue
-            song_id = Path(leaf).stem.strip()
-            if not song_id:
-                logger.warning(f"Skipping blob with invalid song id: {name}")
-                continue
-
-            songs.append(SongInfo(song_id=song_id, blob_name=name))
+        for s in songs_data:
+            songs.append(SongInfo(song_id=s.song_id, url=s.archive_path))
 
         songs.sort(key=lambda s: s.song_id)
         return songs

@@ -1,6 +1,18 @@
 <script>
   import { onDestroy } from "svelte";
   import { uploadSegmentation, fetchStatus, subscribeToTask } from "./lib/api";
+  import AlgorithmStudio from "./components/AlgorithmStudio.svelte";
+  import DatasetManager from "./components/DatasetManager.svelte";
+  import EvaluationDashboard from "./components/EvaluationDashboard.svelte";
+
+  let currentPage = "segmentation";
+
+  const NAV_ITEMS = [
+    { id: "segmentation", label: "Segmentation" },
+    { id: "studio", label: "Algorithm Studio" },
+    { id: "datasets", label: "Datasets" },
+    { id: "evaluation", label: "Evaluation" },
+  ];
   import { Button } from "src/lib/components/ui/button";
   import * as Card from "src/lib/components/ui/card";
   import {
@@ -107,7 +119,7 @@
 
       // Use SSE instead of polling
       console.log("Subscribing to SSE for task:", taskId);
-      unsubscribe = subscribeToTask(taskId, (data) => {
+      unsubscribe = subscribeToTask(taskId, /** @param {{status?: string, results?: Record<string, unknown>, error?: string}} data */ (data) => {
         console.log("SSE received data:", data);
         rawStatus = data;
         results = { ...results, ...(data.results || {}) };
@@ -171,6 +183,33 @@
       class="absolute left-[-120px] top-[55%] h-[420px] w-[420px] rounded-full bg-cyan-500/10 blur-3xl"
     ></div>
   </div>
+
+  <!-- Top navigation bar -->
+  <nav class="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
+    <div class="mx-auto flex max-w-7xl items-center gap-1 px-4 py-2">
+      <span class="mr-4 text-sm font-semibold text-zinc-200 tracking-tight">MusicSeg</span>
+      {#each NAV_ITEMS as item}
+        <button
+          class={"rounded-xl px-3 py-1.5 text-sm font-medium transition-colors " +
+            (currentPage === item.id
+              ? "bg-indigo-500/20 text-indigo-300"
+              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}
+          on:click={() => (currentPage = item.id)}
+        >
+          {item.label}
+        </button>
+      {/each}
+    </div>
+  </nav>
+
+  <!-- Page router -->
+  {#if currentPage === "studio"}
+    <AlgorithmStudio />
+  {:else if currentPage === "datasets"}
+    <DatasetManager />
+  {:else if currentPage === "evaluation"}
+    <EvaluationDashboard />
+  {:else}
 
   <div class="mx-auto max-w-5xl px-4 py-10">
     <!-- Header -->
@@ -260,9 +299,10 @@
 
         <!-- File -->
         <div class="mt-6">
-          <label class="text-xs font-medium text-zinc-300">Audio file</label>
+          <label class="text-xs font-medium text-zinc-300" for="audio-file">Audio file</label>
           <div class="mt-2 rounded-2xl border border-zinc-800 bg-zinc-950 p-3">
             <input
+              id="audio-file"
               class="block w-full cursor-pointer text-sm text-zinc-200 file:mr-4 file:rounded-xl file:border-0 file:bg-zinc-800 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-zinc-100 hover:file:bg-zinc-700"
               type="file"
               accept=".mp3,.wav,.flac,.ogg,.m4a"
@@ -298,7 +338,7 @@
 
         <!-- Algorithms -->
         <div class="mt-6">
-          <label class="text-xs font-medium text-zinc-300">Algorithms</label>
+          <p class="text-xs font-medium text-zinc-300">Algorithms</p>
 
           <div class="mt-3 grid gap-2">
             {#each ALL_ALGOS as a}
@@ -463,4 +503,5 @@
       Built with Svelte + Tailwind.
     </footer>
   </div>
+  {/if}
 </main>

@@ -15,3 +15,5 @@ dependencies:
   - aiofiles
   - python-multipart
   - azure-storage-blob
+  - pip:
+    - mir_eval
