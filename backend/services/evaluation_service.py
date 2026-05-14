@@ -61,7 +61,7 @@ def _greedy_match(ref: np.ndarray, est: np.ndarray, tolerance: float) -> tuple[i
 def compute_boundary_metrics(
     ref_segments: list[dict],
     est_segments: list[dict],
-    tolerance: float = 3.0,
+    tolerance: float = 0.5,
 ) -> dict:
     """
     Compute boundary detection metrics between reference and estimated segments.
@@ -69,7 +69,9 @@ def compute_boundary_metrics(
     Args:
         ref_segments: Ground truth segments [{start, end, label}, ...].
         est_segments: Algorithm output segments [{start, end, label}, ...].
-        tolerance: Tolerance window in seconds (default ±3s, MIR convention).
+        tolerance: Tolerance window in seconds (default ±0.5 s — MIREX standard,
+                   FMP Section 4.5.4, Eq. 4.57).  The old default of 3.0 s was
+                   too lenient and inflated scores on SALAMI evaluations.
 
     Returns:
         {

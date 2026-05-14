@@ -13,6 +13,8 @@
     uploadSegmentation,
     testAlgorithm,
     getSongStreamUrl,
+    startBatchEval,
+    subscribeToBatchEval,
   } from "../lib/api.js";
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -352,13 +354,165 @@
       return { x: historyXForTime(t), label: `${t.toFixed(0)}s` };
     });
   }
+
+  // ── Batch Eval ────────────────────────────────────────────────────────────
+  let batchOpen        = false;
+  let batchMaxTracks   = 20;
+  let batchTolerance   = 0.5;
+  let batchRunning     = false;
+  let batchLines       = [];
+  let batchSummary     = null;
+  let batchRows        = [];
+  let batchError       = null;
+  let batchLogEl       = null;
+  let batchUnsub       = null;
+
+  function openBatchPanel() {
+    batchOpen    = true;
+    batchLines   = [];
+    batchSummary = null;
+    batchRows    = [];
+    batchError   = null;
+  }
+
+  async function runBatchEval() {
+    if (batchRunning) return;
+    batchRunning = true;
+    batchLines   = [];
+    batchSummary = null;
+    batchRows    = [];
+    batchError   = null;
+
+    try {
+      const { job_id } = await startBatchEval({
+        maxTracks: batchMaxTracks,
+        toleranceSeconds: batchTolerance,
+      });
+
+      batchUnsub = subscribeToBatchEval(
+        job_id,
+        (line) => {
+          batchLines = [...batchLines, line];
+          // auto-scroll log
+          if (batchLogEl) setTimeout(() => { batchLogEl.scrollTop = batchLogEl.scrollHeight; }, 0);
+        },
+        ({ summary, rows, error }) => {
+          batchSummary = summary;
+          batchRows    = rows ?? [];
+          batchError   = error;
+          batchRunning = false;
+        },
+      );
+    } catch (e) {
+      batchError   = e.message;
+      batchRunning = false;
+    }
+  }
+
+  function closeBatchPanel() {
+    if (batchUnsub) { batchUnsub(); batchUnsub = null; }
+    batchOpen = false;
+  }
+
+  function copyBatchReport() {
+    const text = batchLines.join("\n") + (batchSummary ? "\n\n" + batchSummary : "");
+    navigator.clipboard.writeText(text).catch(() => {});
+    copied = true;
+    setTimeout(() => { copied = false; }, 2000);
+  }
+
+  // ── Copy all results ──────────────────────────────────────────────────────
+  let copied = false;
+
+  function copyAllResults() {
+    const lines = [];
+
+    if (selectedTrack) {
+      lines.push(`Track: ${selectedTrack.title || selectedTrack.song_id}`);
+      lines.push(`Ground Truth: ${selectedTrack.ground_truth?.length || 0} segments`);
+      lines.push('');
+    }
+
+    if (Object.keys(pastEvals).length > 0) {
+      lines.push('=== Evaluation History ===');
+      lines.push('Algorithm\tTolerance\tPrecision\tRecall\tF1\tDate');
+      for (const [algoName, runs] of Object.entries(pastEvals)) {
+        for (const run of runs) {
+          lines.push([
+            algoName,
+            `±${run.tolerance_seconds}s`,
+            fmtPct(run.metrics?.precision),
+            fmtPct(run.metrics?.recall),
+            fmtPct(run.metrics?.f_measure),
+            run.created_at ? new Date(run.created_at).toLocaleDateString() : '—',
+          ].join('\t'));
+        }
+      }
+      lines.push('');
+    }
+
+    if (comparisonResults) {
+      lines.push(`=== Comparison Results (tolerance ±${toleranceSeconds}s) ===`);
+      lines.push('Algorithm\tPrecision\tRecall\tF1\t#Boundaries');
+      for (const [name, result] of Object.entries(comparisonResults)) {
+        if (result.error) {
+          lines.push(`${name}\tERROR: ${result.error}`);
+        } else {
+          lines.push([
+            name,
+            fmtPct(result.metrics?.precision),
+            fmtPct(result.metrics?.recall),
+            fmtPct(result.metrics?.f_measure),
+            `${result.metrics?.n_boundaries_est ?? '—'} / ${result.metrics?.n_boundaries_ref ?? '—'} ref`,
+          ].join('\t'));
+        }
+      }
+      lines.push('');
+    }
+
+    if (selectedHistoryItem) {
+      lines.push('=== Selected Segmentation Run ===');
+      lines.push(`Algorithm: ${selectedHistoryItem.algorithm_name}`);
+      lines.push(`Task: ${selectedHistoryItem.task_id || '—'} · ${selectedHistoryItem.task_status || 'unknown'}`);
+      if (selectedHistoryItem.metrics) {
+        lines.push(`Precision: ${fmtPct(selectedHistoryItem.metrics?.precision)}`);
+        lines.push(`Recall: ${fmtPct(selectedHistoryItem.metrics?.recall)}`);
+        lines.push(`F1: ${fmtPct(selectedHistoryItem.metrics?.f_measure)}`);
+        lines.push(`Tolerance: ±${selectedHistoryItem.tolerance_seconds}s`);
+      }
+      if (selectedHistoryItem.segments?.length > 0) {
+        lines.push('');
+        lines.push('Segments:');
+        lines.push('Start\tEnd\tLabel\tType');
+        for (const seg of selectedHistoryItem.segments) {
+          lines.push(`${seg.start}s\t${seg.end}s\t${seg.label || '—'}\t${seg.section_type || '—'}`);
+        }
+      }
+    }
+
+    const text = lines.join('\n');
+    navigator.clipboard.writeText(text).catch(() => {
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    });
+    copied = true;
+    setTimeout(() => { copied = false; }, 2000);
+  }
 </script>
 
 <div class="flex h-[calc(100vh-49px)] overflow-hidden text-zinc-100">
   <!-- Left: configuration panel -->
   <aside class="w-72 shrink-0 border-r border-zinc-800 bg-zinc-900/50 flex flex-col overflow-y-auto">
-    <div class="p-4 border-b border-zinc-800">
+    <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
       <span class="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Configuration</span>
+      <button
+        on:click={openBatchPanel}
+        class="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-500"
+      >Batch Eval</button>
     </div>
 
     <div class="p-4 space-y-5">
@@ -473,6 +627,131 @@
     </div>
   </aside>
 
+  <!-- Batch Eval sliding panel -->
+  {#if batchOpen}
+    <div class="fixed inset-0 z-40 flex" role="dialog" aria-modal="true">
+      <!-- backdrop -->
+      <button class="absolute inset-0 bg-black/60" on:click={closeBatchPanel} aria-label="Close batch eval"></button>
+
+      <!-- panel -->
+      <div class="relative ml-auto w-full max-w-2xl h-full bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl z-50">
+        <!-- header -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
+          <div>
+            <h2 class="text-base font-semibold text-zinc-100">Batch Evaluation</h2>
+            <p class="text-xs text-zinc-500 mt-0.5">Run custom algorithm on multiple SALAMI tracks</p>
+          </div>
+          <button on:click={closeBatchPanel} class="text-zinc-500 hover:text-zinc-200 text-xl leading-none">✕</button>
+        </div>
+
+        <!-- config -->
+        <div class="px-5 py-4 border-b border-zinc-800 shrink-0 space-y-4">
+          <div class="flex items-center gap-6">
+            <div>
+              <label for="batch-max-tracks" class="text-xs font-medium text-zinc-400 block mb-1">Max tracks</label>
+              <input
+                id="batch-max-tracks"
+                type="number"
+                min="1" max="500"
+                bind:value={batchMaxTracks}
+                disabled={batchRunning}
+                class="w-24 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
+              />
+              <p class="text-[10px] text-zinc-600 mt-0.5">0 = all tracks</p>
+            </div>
+            <div>
+              <label for="batch-tolerance" class="text-xs font-medium text-zinc-400 block mb-1">
+                Tolerance: <span class="text-zinc-200">±{batchTolerance}s</span>
+              </label>
+              <input
+                id="batch-tolerance"
+                type="range" min="0.5" max="3" step="0.5"
+                bind:value={batchTolerance}
+                disabled={batchRunning}
+                class="w-40 accent-indigo-500"
+              />
+            </div>
+            <button
+              on:click={runBatchEval}
+              disabled={batchRunning}
+              class="ml-auto rounded-xl bg-indigo-500 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {#if batchRunning}
+                <span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-white/80"></span>
+                Running…
+              {:else}
+                ▶ Run
+              {/if}
+            </button>
+          </div>
+        </div>
+
+        <!-- log -->
+        <div
+          bind:this={batchLogEl}
+          class="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-zinc-300 bg-zinc-950 space-y-0.5"
+        >
+          {#if batchLines.length === 0 && !batchRunning}
+            <p class="text-zinc-600">Configure and press Run to start batch evaluation.</p>
+          {/if}
+          {#each batchLines as line}
+            <div class={line.startsWith('  P=') ? 'text-emerald-400' : line.startsWith('  skip') || line.startsWith('FATAL') ? 'text-red-400' : line.startsWith('[') ? 'text-zinc-200' : 'text-zinc-400'}>
+              {line || ' '}
+            </div>
+          {/each}
+          {#if batchError && !batchRunning}
+            <div class="text-red-400 mt-2">Error: {batchError}</div>
+          {/if}
+        </div>
+
+        <!-- summary table (when done) -->
+        {#if batchRows.length > 0 && !batchRunning}
+          <div class="border-t border-zinc-800 shrink-0">
+            <div class="px-5 py-3 flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Results</h3>
+              <button
+                on:click={copyBatchReport}
+                class="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
+              >
+                {#if copied}
+                  <span class="text-emerald-400">Copied!</span>
+                {:else}
+                  Copy report
+                {/if}
+              </button>
+            </div>
+            <div class="overflow-x-auto max-h-52">
+              <table class="w-full text-xs">
+                <thead class="border-b border-zinc-800 sticky top-0 bg-zinc-950">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-zinc-400 font-medium">ID</th>
+                    <th class="px-4 py-2 text-left text-zinc-400 font-medium">Title</th>
+                    <th class="px-4 py-2 text-right text-zinc-400 font-medium">P</th>
+                    <th class="px-4 py-2 text-right text-zinc-400 font-medium">R</th>
+                    <th class="px-4 py-2 text-right text-zinc-400 font-medium">F1</th>
+                    <th class="px-4 py-2 text-right text-zinc-400 font-medium">est/ref</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each batchRows.filter(r => !r.error) as row}
+                    <tr class="border-b border-zinc-800/40">
+                      <td class="px-4 py-1.5 text-zinc-500">{row.song_id}</td>
+                      <td class="px-4 py-1.5 text-zinc-300 max-w-[160px] truncate">{row.title}</td>
+                      <td class="px-4 py-1.5 text-right text-zinc-300">{fmtPct(row.precision)}</td>
+                      <td class="px-4 py-1.5 text-right text-zinc-300">{fmtPct(row.recall)}</td>
+                      <td class={"px-4 py-1.5 text-right font-bold " + fmtF1Color(row.f_measure)}>{fmtPct(row.f_measure)}</td>
+                      <td class="px-4 py-1.5 text-right text-zinc-500">{row.n_est}/{row.n_ref}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   <!-- Right: results -->
   <div class="flex-1 overflow-y-auto p-6 space-y-6">
     {#if !selectedTrack}
@@ -520,14 +799,34 @@
       </div>
     {:else}
       <!-- Track header -->
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-5 py-4">
-        <h2 class="text-base font-semibold text-zinc-100">{selectedTrack.title || selectedTrack.song_id}</h2>
-        <p class="text-xs text-zinc-400 mt-1">
-          Ground truth: {selectedTrack.ground_truth?.length || 0} segments
-          {#if selectedTrack.audio_url}
-            · <a href={selectedTrack.audio_url} target="_blank" rel="noopener" class="text-indigo-400 hover:underline">audio ↗</a>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-5 py-4 flex items-center justify-between gap-4">
+        <div>
+          <h2 class="text-base font-semibold text-zinc-100">{selectedTrack.title || selectedTrack.song_id}</h2>
+          <p class="text-xs text-zinc-400 mt-1">
+            Ground truth: {selectedTrack.ground_truth?.length || 0} segments
+            {#if selectedTrack.audio_url}
+              · <a href={selectedTrack.audio_url} target="_blank" rel="noopener" class="text-indigo-400 hover:underline">audio ↗</a>
+            {/if}
+          </p>
+        </div>
+        <button
+          on:click={copyAllResults}
+          class="shrink-0 flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition-colors"
+          title="Copy all results to clipboard"
+        >
+          {#if copied}
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-emerald-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 00-1.414 0L8 12.586 4.707 9.293a1 1 0 00-1.414 1.414l4 4a1 1 0 001.414 0l8-8a1 1 0 000-1.414z" clip-rule="evenodd" />
+            </svg>
+            <span class="text-emerald-400">Copied!</span>
+          {:else}
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+              <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+            </svg>
+            Copy Results
           {/if}
-        </p>
+        </button>
       </div>
 
       <!-- Ground truth preview -->

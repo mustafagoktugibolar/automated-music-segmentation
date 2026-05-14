@@ -5,26 +5,270 @@ Provides endpoints to:
 - Run boundary detection evaluation for a completed segmentation task against a track's ground truth
 - Compare multiple algorithms on the same track
 - Retrieve stored evaluation results
+- Run a batch evaluation across the full SALAMI dataset
 """
 
+import asyncio
+import csv
+import json
+import os
+import threading
+import time
+import urllib.request
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from backend.db.models import DatasetTrack, EvaluationRun, SegmentationTask
 from backend.db.postgreSQL import SessionLocal
 from backend.services.evaluation_service import compute_boundary_metrics
+from backend.services.salami_parser import parse_salami_annotation
 from shared.logger import get_logger
+from shared.rabbitmq import RabbitMQClient
 
 logger = get_logger()
 router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
+
+UPLOAD_DIR        = os.getenv("UPLOAD_DIR", "media/uploads")
+SALAMI_META_CSV   = "/app/data/salami/metadata/id_index_internetarchive.csv"
+SALAMI_ANNOT_DIR  = "/app/data/salami/annotations"
+
+# In-memory store for active batch jobs  {job_id: {lines, done, error, summary}}
+_batch_jobs: dict[str, dict] = {}
+
+
+# ---------------------------------------------------------------------------
+# Batch eval helpers
+# ---------------------------------------------------------------------------
+
+def _load_salami_metadata() -> dict[str, dict]:
+    meta: dict[str, dict] = {}
+    if not os.path.exists(SALAMI_META_CSV):
+        return meta
+    with open(SALAMI_META_CSV, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            sid = str(row.get("SONG_ID", "")).strip()
+            if sid:
+                meta[sid] = {
+                    "title":  row.get("TITLE", "?"),
+                    "url":    row.get("URL", "").strip(),
+                }
+    return meta
+
+
+def _list_annotated_song_ids() -> list[str]:
+    if not os.path.isdir(SALAMI_ANNOT_DIR):
+        return []
+    ids = []
+    for name in os.listdir(SALAMI_ANNOT_DIR):
+        if name.isdigit():
+            d = os.path.join(SALAMI_ANNOT_DIR, name)
+            if (os.path.exists(os.path.join(d, "parsed", "textfile1_functions.txt"))
+                    or os.path.exists(os.path.join(d, "textfile1.txt"))):
+                ids.append(name)
+    return sorted(ids, key=int)
+
+
+def _download_audio(url: str, timeout: int = 90) -> Optional[bytes]:
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "music-segmentation/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except Exception:
+        return None
+
+
+def _dispatch_to_worker(audio_bytes: bytes, filename: str) -> str:
+    """Save audio to disk, create DB task, publish to RabbitMQ. Returns task_id."""
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    task_id   = str(uuid.uuid4())
+    file_path = os.path.join(UPLOAD_DIR, f"{task_id}_{filename}")
+
+    with open(file_path, "wb") as fh:
+        fh.write(audio_bytes)
+
+    db = SessionLocal()
+    try:
+        db.add(SegmentationTask(
+            task_id=task_id,
+            filename=filename,
+            status="processing",
+            results={},
+            expected_algorithms=["custom"],
+            source_type="upload",
+            requested_params=None,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    rmq = RabbitMQClient(service_name="batch_eval")
+    rmq.publish(
+        exchange="segmentation_topic",
+        routing_key="segmentation.custom",
+        message={
+            "task_id": task_id,
+            "source_type": "upload",
+            "original_filename": filename,
+            "file_path": file_path,
+            "content_type": "audio/mpeg",
+            "algorithms": ["custom"],
+            "params": {},
+        },
+    )
+    return task_id
+
+
+def _wait_for_task(task_id: str, timeout: int = 240, poll_s: float = 3.0) -> Optional[dict]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        db = SessionLocal()
+        try:
+            task = db.query(SegmentationTask).filter(
+                SegmentationTask.task_id == task_id
+            ).first()
+            if task and task.status == "completed":
+                return task.results or {}
+            if task and task.status == "failed":
+                return None
+        finally:
+            db.close()
+        time.sleep(poll_s)
+    return None
+
+
+def _batch_summary(rows: list[dict], tolerance: float) -> str:
+    ok = [r for r in rows if not r.get("error")]
+    if not ok:
+        return "No tracks evaluated successfully."
+
+    def mean(xs): return sum(xs) / len(xs) if xs else 0.0
+
+    prec  = mean([r["precision"]  for r in ok])
+    rec   = mean([r["recall"]     for r in ok])
+    f1    = mean([r["f_measure"]  for r in ok])
+    r_ref = mean([r["n_ref"]      for r in ok])
+    r_est = mean([r["n_est"]      for r in ok])
+    ratio = r_est / r_ref if r_ref > 0 else 0
+
+    seg_note = "over-segmenting" if ratio > 2 else ("under-segmenting" if ratio < 0.5 else "ok")
+
+    lines = [
+        f"Tracks OK   : {len(ok)} / {len(rows)}",
+        f"Tolerance   : ±{tolerance}s",
+        f"Precision   : {prec:.3f}",
+        f"Recall      : {rec:.3f}",
+        f"F-measure   : {f1:.3f}",
+        f"Avg est/ref : {r_est:.1f} / {r_ref:.1f}  [{seg_note}]",
+        "",
+        "Worst tracks:",
+    ]
+    for r in sorted(ok, key=lambda x: x["f_measure"])[:5]:
+        lines.append(f"  {r['song_id']:>6}  {r['title'][:32]:<32}  F1={r['f_measure']:.3f}  est={r['n_est']}  ref={r['n_ref']}")
+    lines.append("")
+    lines.append("Best tracks:")
+    for r in sorted(ok, key=lambda x: x["f_measure"], reverse=True)[:5]:
+        lines.append(f"  {r['song_id']:>6}  {r['title'][:32]:<32}  F1={r['f_measure']:.3f}  est={r['n_est']}  ref={r['n_ref']}")
+    return "\n".join(lines)
+
+
+def _run_batch_eval_sync(job_id: str, max_tracks: int, tolerance: float) -> None:
+    job = _batch_jobs[job_id]
+
+    def log(line: str):
+        job["lines"].append(line)
+
+    try:
+        meta = _load_salami_metadata()
+        log(f"Metadata: {len(meta)} entries")
+
+        all_ids = _list_annotated_song_ids()
+        log(f"Annotated: {len(all_ids)} songs")
+
+        candidates = [
+            (sid, meta[sid]) for sid in all_ids
+            if sid in meta and meta[sid].get("url")
+        ]
+        if max_tracks > 0:
+            candidates = candidates[:max_tracks]
+        log(f"Evaluating: {len(candidates)} tracks\n")
+
+        rows: list[dict] = []
+        for i, (sid, m) in enumerate(candidates, 1):
+            title = m["title"]
+            log(f"[{i}/{len(candidates)}] {sid}  {title[:40]}")
+
+            ref = parse_salami_annotation(sid, annotator=1) or parse_salami_annotation(sid, annotator=2)
+            if not ref:
+                log("  skip: no annotation")
+                rows.append({"song_id": sid, "title": title, "error": "no_annotation"})
+                continue
+
+            audio = _download_audio(m["url"])
+            if audio is None:
+                log("  skip: download failed")
+                rows.append({"song_id": sid, "title": title, "error": "download_failed"})
+                continue
+
+            try:
+                task_id = _dispatch_to_worker(audio, f"{sid}.mp3")
+            except Exception as exc:
+                log(f"  skip: dispatch error — {exc}")
+                rows.append({"song_id": sid, "title": title, "error": f"dispatch: {exc}"})
+                continue
+
+            results = _wait_for_task(task_id)
+            if not results:
+                log("  skip: timeout / worker failed")
+                rows.append({"song_id": sid, "title": title, "error": "timeout"})
+                continue
+
+            est = next(iter(results.values()), [])
+            m2 = compute_boundary_metrics(ref, est, tolerance=tolerance)
+            rows.append({
+                "song_id":   sid,
+                "title":     title,
+                "n_ref":     m2["n_boundaries_ref"],
+                "n_est":     m2["n_boundaries_est"],
+                "precision": m2["precision"],
+                "recall":    m2["recall"],
+                "f_measure": m2["f_measure"],
+                "error":     "",
+            })
+            log(f"  P={m2['precision']:.3f}  R={m2['recall']:.3f}  F1={m2['f_measure']:.3f}"
+                f"  (est={m2['n_boundaries_est']}/ref={m2['n_boundaries_ref']})")
+
+        summary = _batch_summary(rows, tolerance)
+        job["summary"] = summary
+        job["rows"]    = rows
+        log("\n=== SUMMARY ===\n" + summary)
+
+    except Exception as exc:
+        import traceback
+        job["error"] = str(exc)
+        log(f"FATAL: {exc}\n{traceback.format_exc()}")
+    finally:
+        job["done"] = True
 
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
+
+
+class BatchEvalRequest(BaseModel):
+    max_tracks: int  = Field(default=20, ge=0, le=500,
+                             description="0 = all available tracks")
+    tolerance_seconds: float = Field(default=0.5, gt=0, le=10)
 
 
 class EvaluationRunRequest(BaseModel):
@@ -45,6 +289,52 @@ class CompareRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.post("/batch")
+async def start_batch_eval(req: BatchEvalRequest):
+    """Start a background SALAMI batch evaluation job. Returns job_id."""
+    job_id = str(uuid.uuid4())
+    _batch_jobs[job_id] = {"lines": [], "done": False, "error": None, "summary": None, "rows": []}
+    threading.Thread(
+        target=_run_batch_eval_sync,
+        args=(job_id, req.max_tracks, req.tolerance_seconds),
+        daemon=True,
+    ).start()
+    return {"job_id": job_id}
+
+
+@router.get("/batch/{job_id}/stream")
+async def stream_batch_eval(job_id: str):
+    """SSE stream: yields progress lines, then a final done event with summary."""
+    if job_id not in _batch_jobs:
+        raise HTTPException(status_code=404, detail="Batch job not found")
+
+    async def generate():
+        cursor = 0
+        while True:
+            job   = _batch_jobs.get(job_id, {})
+            lines = job.get("lines", [])
+            while cursor < len(lines):
+                yield f"data: {json.dumps({'line': lines[cursor]})}\n\n"
+                cursor += 1
+            if job.get("done"):
+                yield f"data: {json.dumps({'done': True, 'summary': job.get('summary'), 'rows': job.get('rows', []), 'error': job.get('error')})}\n\n"
+                break
+            await asyncio.sleep(0.4)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.get("/batch/{job_id}/result")
+async def get_batch_result(job_id: str):
+    """Return the final result of a completed batch eval job."""
+    job = _batch_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Batch job not found")
+    if not job["done"]:
+        raise HTTPException(status_code=202, detail="Job still running")
+    return {"job_id": job_id, "summary": job.get("summary"), "rows": job.get("rows", []), "error": job.get("error")}
 
 
 @router.post("/run")

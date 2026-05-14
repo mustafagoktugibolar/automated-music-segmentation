@@ -234,6 +234,45 @@ export function getEvaluation(evalId) {
 }
 
 /**
+ * @param {{ maxTracks?: number, toleranceSeconds?: number }} options
+ */
+export function startBatchEval({ maxTracks = 20, toleranceSeconds = 0.5 } = {}) {
+  return apiFetch("/evaluation/batch", {
+    method: "POST",
+    ...jsonBody({ max_tracks: maxTracks, tolerance_seconds: toleranceSeconds }),
+  });
+}
+
+/**
+ * Subscribe to batch eval progress via SSE.
+ * onLine(line: string) called for each log line.
+ * onDone({ summary, rows, error }) called when complete.
+ * Returns an unsubscribe function.
+ *
+ * @param {string} jobId
+ * @param {(line: string) => void} onLine
+ * @param {(result: { summary: string | null, rows: any[], error: string | null }) => void} onDone
+ */
+export function subscribeToBatchEval(jobId, onLine, onDone) {
+  const es = new EventSource(`${BACKEND_URL}/evaluation/batch/${jobId}/stream`);
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.done) {
+        onDone({ summary: data.summary ?? null, rows: data.rows ?? [], error: data.error ?? null });
+        es.close();
+      } else if (data.line !== undefined) {
+        onLine(data.line);
+      }
+    } catch (e) {
+      console.error("SSE parse error:", e);
+    }
+  };
+  es.onerror = () => es.close();
+  return () => es.close();
+}
+
+/**
  * @param {UploadSegmentationOptions} options
  */
 export async function uploadSegmentation({ file, algorithms, webhook_url = null }) {

@@ -1,0 +1,42 @@
+============================================================
+  SALAMI Batch Evaluation — custom algorithm
+============================================================
+  Tracks attempted : 3
+  Tracks evaluated : 1
+  Errors / skipped : 2
+  Tolerance        : ±0.5s
+
+--- Macro-Averaged Metrics ---
+  Precision : 0.133  (std 0.000)
+  Recall    : 0.133  (std 0.000)
+  F-measure : 0.133  (std 0.000)
+
+--- Boundary Count Analysis ---
+  Avg ref  boundaries : 15.0
+  Avg est  boundaries : 15.0
+  Ratio est/ref       : 1.00  (ok)
+  Avg segmentation    : 6.0s per track
+
+--- Zero-F1 tracks : 0 / 1 ---
+
+--- Worst 10 tracks (F1) ---
+      ID  Title                                      P       R      F1   est   ref
+  ------------------------------------------------------------------------
+     957  Tip My Glass                           0.133   0.133   0.133    15    15
+
+--- Best 10 tracks (F1) ---
+      ID  Title                                      P       R      F1   est   ref
+  ------------------------------------------------------------------------
+     957  Tip My Glass                           0.133   0.133   0.133    15    15
+
+--- F1 Distribution ---
+  0.0-0.2     1  █
+  0.2-0.4     0  
+  0.4-0.6     0  
+  0.6-0.8     0  
+  0.8-1.0     0  
+
+--- Errors ---
+     956  download_failed
+     955  download_failed
+============================================================
