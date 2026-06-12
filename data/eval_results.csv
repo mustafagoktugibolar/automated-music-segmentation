@@ -1,0 +1,81 @@
+song_id,title,duration_s,n_ref,n_est,precision,recall,f_measure,annotator,tolerance_s,seg_time_s,dl_time_s,n_segments,error
+956,Revolution,,,,,,,,,,2.830382542999814,,download_failed
+955,Freedom Avenue,,,,,,,,,,3.027263084000424,,download_failed
+958,Rap Medley,,,,,,,,,,3.174336293000124,,download_failed
+957,Tip My Glass,290.16,13,9,0.0,0.0,0.0,1,0.5,6.84,0.02,10,
+962,?,,,,,,,,,,2.972267792999901,,download_failed
+960,Woman Across The River,,,,,,,,,,3.9693448350003564,,download_failed
+963,ag2009_01_07s1t02wav  Legalize It Cover,,,,,,,,,,2.6264660429997093,,download_failed
+964,Encore Break Crowd Noise,,,,,,,,,,2.6227150009999605,,download_failed
+959,STK,674.31,12,24,0.125,0.25,0.1667,1,0.5,10.77,0.02,25,
+968,Quinn the Eskimo The Mighty Quinn,,,,,,,,,,2.8272745429999304,,download_failed
+970,Should I stay or should I go,,,,,,,,,,3.064749792999919,,download_failed
+965,The Unwanted Brother,582.54,14,22,0.0455,0.0714,0.0556,2,0.5,9.14,0.02,23,
+967,Europa  Baby >,622.86,13,21,0.0476,0.0769,0.0588,1,0.5,10.34,0.03,22,
+972,High Mountain Girls Can Love*,,,,,,,,,,2.7046567519996643,,download_failed
+971,Figure It Out,306.69,8,16,0.1875,0.375,0.25,1,0.5,5.87,0.01,17,
+975,Jesus Children,,,,,,,,,,1.4967485010001838,,download_failed
+974,Never Been in love,,,,,,,,,,3.066053335000106,,download_failed
+976,Morning Dew,,,,,,,,,,2.8588336249999884,,download_failed
+973,Blue Veins,454.74,7,24,0.0833,0.2857,0.129,1,0.5,7.06,0.02,25,
+978,astralproject20030326t02shn,,,,,,,,,,2.807695292000062,,download_failed
+980,Georgia Peach w_Scott Stiert,,,,,,,,,,1.781960834000074,,download_failed
+981,Black Heart,,,,,,,,,,2.6250045839997256,,download_failed
+979,Smoke Machines,,,,,,,,,,3.612944002000404,,download_failed
+983,Honey To A Bee > Jam,,,,,,,,,,1.8929184180001357,,download_failed
+982,Tupelo Honey,,,,,,,,,,3.763662418000422,,download_failed
+984,Scuba Snacks,,,,,,,,,,2.768992876000084,,download_failed
+986,bip20090524t07flac,,,,,,,,,,2.6828974600002766,,download_failed
+988,Wondering Where The Lions Are Bruce Cockburn,,,,,,,,,,2.8964480849999745,,download_failed
+989,Wheat Demon,,,,,,,,,,2.875537627000085,,download_failed
+990,COMING DOWN,,,,,,,,,,2.841513085000315,,download_failed
+991,Jesse James,,,,,,,,,,3.008271250999769,,download_failed
+994,Creative Process,,,,,,,,,,2.7639190849999977,,download_failed
+992,Mexican Radio,261.15,16,15,0.8,0.75,0.7742,1,0.5,3.98,0.02,16,
+995,Medley,,,,,,,,,,2.9868592519997037,,download_failed
+996,A Lack of Color,,,,,,,,,,2.775577001000329,,download_failed
+997,Glory Daze,,,,,,,,,,2.7271006270002545,,download_failed
+998,They Love Each Other,,,,,,,,,,2.686213834999762,,download_failed
+999,Space in in kingston,,,,,,,,,,2.921170168000117,,download_failed
+1002,Dont Look Me In The Eye,,,,,,,,,,2.801240542999949,,download_failed
+1000,Hideout** 6:39,,,,,,,,,,5.368652418999773,,download_failed
+1004,Fearless,,,,,,,,,,2.7619709590003367,,download_failed
+1003,Im Moving On,,,,,,,,,,4.597354919000281,,download_failed
+1005,Shedlife,,,,,,,,,,3.4146401680000054,,download_failed
+1007,Stuck in the Mud,,,,,,,,,,2.9707995429998846,,download_failed
+1006,The Navy Song,258.02,16,12,0.25,0.1875,0.2143,1,0.5,4.29,0.02,13,
+1010,Yellow submarine,,,,,,,,,,0.8914879170001768,,download_failed
+1008,Special Roll> 6:59,,,,,,,,,,2.804946667999957,,download_failed
+1011,Ride*,,,,,,,,,,2.9519803759999377,,download_failed
+1012,Lucky to Know You,,,,,,,,,,2.834103043000141,,download_failed
+1014,22xs,,,,,,,,,,1.6091661670002395,,download_failed
+1016,Lazy Days,,,,,,,,,,2.8152120849999847,,download_failed
+1018,Not,,,,,,,,,,1.8863655420000214,,download_failed
+1013,Those Get Me Outta Here Blues,453.44,14,20,0.05,0.0714,0.0588,1,0.5,6.8,0.02,21,
+1019,Fireworks Make Me Feel Lonely >,,,,,,,,,,2.8821638760000496,,download_failed
+1020,Samba?,,,,,,,,,,2.942190417999882,,download_failed
+1021,Climb Them Easy,,,,,,,,,,3.0056070020000334,,download_failed
+1022,San Francisco,,,,,,,,,,2.9011880849998306,,download_failed
+1023,James Alley Blues,,,,,,,,,,2.9391868769998837,,download_failed
+1024,Who Makes Your Money,,,,,,,,,,3.5572178769998573,,download_failed
+1026,evil man,,,,,,,,,,2.7735559180000564,,download_failed
+1027,Panthertown,,,,,,,,,,2.729624585000238,,download_failed
+1028,Chicken,,,,,,,,,,2.7340596270000788,,download_failed
+1032,CBC Demo 1 d2t2 you give hate,152.92,12,8,0.875,0.5833,0.7,1,0.5,3.22,0.01,9,
+1034,Grip,,,,,,,,,,3.0593142930001704,,download_failed
+1035,Wild  Wild West,,,,,,,,,,1.5704796679997344,,download_failed
+1036,take the skinheads bowling,,,,,,,,,,2.504126167999857,,download_failed
+1037,Salt Lick,,,,,,,,,,3.008349126000212,,download_failed
+1039,Through the Seasons,,,,,,,,,,2.99068091800018,,download_failed
+1038,ShimSham Honey,354.99,12,15,0.0667,0.0833,0.0741,1,0.5,6.05,0.02,16,
+1042,Built For Comfort*,,,,,,,,,,3.699084918999688,,download_failed
+1043,cg2008101008flac,,,,,,,,,,2.662308584999664,,download_failed
+1044,Wishing Tree,,,,,,,,,,2.802479252000012,,download_failed
+1045,Step back,,,,,,,,,,2.853893918000267,,download_failed
+1047,Unknown,,,,,,,,,,3.565503334999903,,download_failed
+1046,People,383.97,16,11,0.0909,0.0625,0.0741,1,0.5,6.57,0.01,12,
+1048,7 Escape Artist,268.24,8,11,0.0909,0.125,0.1053,1,0.5,5.58,0.01,12,
+1051,Perpetual Revolution,,,,,,,,,,2.4871615010001733,,download_failed
+1053,A Womans Voice Will Drug You,,,,,,,,,,1.595432417000211,,download_failed
+1050,Going Up the Country ** %,274.0,8,13,0.2308,0.375,0.2857,2,0.5,5.24,0.02,14,
+1054,You Done Me Wrong,,,,,,,,,,2.9742043349997402,,download_failed

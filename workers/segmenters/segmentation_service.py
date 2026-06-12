@@ -31,6 +31,7 @@ from sklearn.cluster import KMeans
 
 from shared.logger import get_logger
 from workers.segmenters.multi_feature_fusion import (
+    beat_phrase_boundary_candidates,
     candidates_from_boundaries,
     chord_proxy_boundary_candidates,
     find_boundaries,
@@ -61,11 +62,14 @@ _SMOOTHING_L: int = 14
 _TEMPO_RATIOS: list[float] = [0.66, 0.81, 1.0, 1.22, 1.50]
 
 _SSM_RHO: float = 0.20            # fraction of SSM cells kept (FMP Eq. 4.17)
-_SSM_PENALTY: float = -2.0        # penalty value for sub-threshold cells
 
 _KERNEL_SECONDS: float = 8.0      # checkerboard kernel half-size in seconds (80 frames @ 10 Hz)
+_KERNEL_VAR: float = 1.0          # Gaussian taper variance on normalised [-1,1] coords (FMP Eq. 4.40)
 _NOVELTY_SIGMA: float = 2.5       # Gaussian smoothing σ applied to novelty curve
-_PROMINENCE: float = 0.18         # scipy find_peaks min prominence on [0,1] novelty
+_PROMINENCE: float = 0.12         # scipy find_peaks min prominence on [0,1] novelty
+                                  # (0.18 under-segmented: SALAMI sweep showed
+                                  #  0.12 lifts recall with no precision cost)
+_STRUCTURE_WEIGHT: float = 0.4    # share of structure-feature novelty in the combined curve
 
 _MIN_SEG_DUR: float = 10.0        # minimum segment duration (seconds)
 _N_CLUSTERS: int = 4
@@ -78,8 +82,10 @@ _MAX_SSM_FRAMES: int = 2000       # cap on frames (10 Hz × 4 min = 2400 frames 
 
 # Onset-snapping: after SSM peak picking, snap each boundary to the nearest
 # strong onset within this window.  The SSM locates the right neighbourhood;
-# onset strength gives sub-25ms precision at hop=512.
-_ONSET_SNAP_WINDOW: float = 0.45  # seconds
+# onset strength gives sub-25ms precision at hop=512.  Kept well below the
+# ±0.5s MIREX tolerance so a snap can never push a correct boundary outside
+# the evaluation window.
+_ONSET_SNAP_WINDOW: float = 0.25  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +144,20 @@ def _detect_active_region(
 # Stage 1 — Feature extraction + median-pool to target fps
 # ---------------------------------------------------------------------------
 
+def _median_pool(feat: np.ndarray, pw: int) -> np.ndarray:
+    """Median-pool each pw consecutive columns → shape (D, n_raw//pw)."""
+    if pw <= 1:
+        return feat
+    n_raw = feat.shape[1]
+    n_pooled = n_raw // pw
+    if n_pooled == 0:
+        return feat[:, :1]
+    trimmed = feat[:, : n_pooled * pw]           # (D, n_pooled*pw)
+    return np.median(
+        trimmed.reshape(feat.shape[0], n_pooled, pw), axis=2
+    ).astype(np.float32)
+
+
 def _extract_downsampled_features(
     y: np.ndarray,
     sr: int,
@@ -176,28 +196,19 @@ def _extract_downsampled_features(
         ).astype(np.float32)
 
     # --- MFCC ---
+    # MFCC0 ≈ frame log-energy: its magnitude swamps the higher coefficients
+    # under cosine similarity, turning the "timbre SSM" into a loudness SSM.
+    # Request one extra coefficient and drop the first.
     if use_mfcc:
         try:
             mfcc_raw = librosa.feature.mfcc(
-                y=y, sr=sr, hop_length=hop_length, n_mfcc=n_mfcc
-            ).astype(np.float32)
+                y=y, sr=sr, hop_length=hop_length, n_mfcc=n_mfcc + 1
+            )[1:].astype(np.float32)
         except Exception as exc:
             logger.warning("MFCC failed (%s); disabling.", exc)
             mfcc_raw = np.zeros((n_mfcc, chroma_raw.shape[1]), dtype=np.float32)
     else:
         mfcc_raw = np.zeros((n_mfcc, chroma_raw.shape[1]), dtype=np.float32)
-
-    def _median_pool(feat: np.ndarray, pw: int) -> np.ndarray:
-        """Median-pool each pw consecutive columns → shape (D, n_raw//pw)."""
-        n_raw = feat.shape[1]
-        n_pooled = n_raw // pw
-        if n_pooled == 0:
-            return feat[:, :1]
-        # Reshape and take median along frame axis
-        trimmed = feat[:, : n_pooled * pw]           # (D, n_pooled*pw)
-        return np.median(
-            trimmed.reshape(feat.shape[0], n_pooled, pw), axis=2
-        ).astype(np.float32)
 
     chroma = _median_pool(chroma_raw, pool_w)
     mfcc   = _median_pool(mfcc_raw,   pool_w)
@@ -210,6 +221,12 @@ def _extract_downsampled_features(
 
     chroma = _l2_norm(chroma)
     if use_mfcc:
+        # Z-score per coefficient before cosine: MFCC dimensions have wildly
+        # different scales, so without standardisation the low-order
+        # coefficients dominate the inner product.
+        mu  = np.mean(mfcc, axis=1, keepdims=True)
+        std = np.std(mfcc, axis=1, keepdims=True)
+        mfcc = (mfcc - mu) / np.maximum(std, 1e-8)
         mfcc = _l2_norm(mfcc)
 
     N = chroma.shape[1]
@@ -276,13 +293,20 @@ def _build_combined_ssm(
 # Stage 3 — SSM enhancement
 # ---------------------------------------------------------------------------
 
-def _diagonal_smooth_theta(S: np.ndarray, L: int, theta: float) -> np.ndarray:
+def _diagonal_smooth_theta(
+    S: np.ndarray, L: int, theta: float, forward: bool = True
+) -> np.ndarray:
     """
     Smooth S along direction (1, theta) — FMP Eq. 4.12.
 
-    S_L[n, m] = (1/L) Σ_{l=0}^{L-1} S[n-l, m-round(l·theta)]
+    forward=True  (trailing): S_L[n, m] = (1/L) Σ_{l} S[n-l, m-round(l·θ)]
+    forward=False (leading):  S_L[n, m] = (1/L) Σ_{l} S[n+l, m+round(l·θ)]
 
-    theta=1.0 gives standard diagonal smoothing (Eq. 4.11).
+    Both directions are needed: a single trailing average smears every block
+    edge ~L/2 frames late, which shifts all detected boundaries by the same
+    amount (≈1.3s at L=14, 5 Hz — outside the ±0.5s tolerance on its own).
+    Taking the cell-wise max of the two keeps block edges anchored at the
+    true transition.  theta=1.0 gives standard diagonal smoothing (Eq. 4.11).
     """
     N = S.shape[0]
     S_out = np.zeros((N, N), dtype=np.float32)
@@ -292,41 +316,57 @@ def _diagonal_smooth_theta(S: np.ndarray, L: int, theta: float) -> np.ndarray:
         c_sh = int(round(l * theta))
         if r_sh >= N or c_sh >= N:
             break
-        S_out[r_sh:, c_sh:] += S[: N - r_sh, : N - c_sh]
+        if forward:
+            S_out[r_sh:, c_sh:] += S[: N - r_sh, : N - c_sh]
+        else:
+            S_out[: N - r_sh, : N - c_sh] += S[r_sh:, c_sh:]
         count += 1
     return S_out / max(count, 1)
 
 
-def _compute_enhanced_ssm(
+def _smooth_ssm(
     S_raw: np.ndarray,
     L: int,
     tempo_ratios: list[float] = _TEMPO_RATIOS,
-    rho: float = _SSM_RHO,
-    penalty: float = _SSM_PENALTY,
 ) -> np.ndarray:
     """
-    Full SSM enhancement: tempo-invariant diagonal smoothing → threshold.
+    Tempo-invariant diagonal smoothing — FMP Section 4.2.2, Eq. 4.12-4.13.
 
-    FMP Section 4.2.2:
-      1. Smooth at each θ ∈ Θ (Eq. 4.12-4.13), forward + backward.
-      2. Cell-wise max over all 2|Θ| versions.
-      3. Global threshold: top ρ cells normalised to [0,1]; rest → penalty δ.
+    Smooth at each θ ∈ Θ, forward + backward, then take the cell-wise max
+    over all 2|Θ| versions.  The result keeps the cosine value range, which
+    is what the checkerboard novelty kernel expects; thresholding with a
+    penalty (Eq. 4.17) is applied separately and only where sparseness is
+    wanted (structure features, segment labelling).
     """
     versions: list[np.ndarray] = []
     for theta in tempo_ratios:
-        Sf = _diagonal_smooth_theta(S_raw, L, theta)
-        Sb = _diagonal_smooth_theta(S_raw.T, L, theta).T
+        Sf = _diagonal_smooth_theta(S_raw, L, theta, forward=True)
+        Sb = _diagonal_smooth_theta(S_raw, L, theta, forward=False)
         versions.append(np.maximum(Sf, Sb))
 
     S_smooth = np.max(np.stack(versions, axis=0), axis=0).astype(np.float32)
     np.fill_diagonal(S_smooth, 1.0)
+    return S_smooth
 
+
+def _threshold_ssm(
+    S_smooth: np.ndarray,
+    rho: float = _SSM_RHO,
+    delta: float = 0.0,
+) -> np.ndarray:
+    """
+    Global relative thresholding — FMP Eq. 4.17 with δ=0 (sparsify only).
+
+    Keeps the top ρ cells rescaled to [0,1]; the rest are set to delta.
+    A negative penalty δ is only useful for path-family DP scoring — for
+    structure features and segment similarity a zero floor is correct.
+    """
     thresh = float(np.percentile(S_smooth, (1.0 - rho) * 100.0))
     denom = max(1.0 - thresh, 1e-8)
     S_enh = np.where(
         S_smooth >= thresh,
         (S_smooth - thresh) / denom,
-        penalty,
+        delta,
     ).astype(np.float32)
     np.fill_diagonal(S_enh, 1.0)
     return S_enh
@@ -336,35 +376,80 @@ def _compute_enhanced_ssm(
 # Stage 4 — Novelty curve (Gaussian checkerboard kernel)
 # ---------------------------------------------------------------------------
 
-def _compute_novelty_ssm(S: np.ndarray, L: int, gamma: float = 10.0) -> np.ndarray:
+def _compute_novelty_ssm(S: np.ndarray, L: int, var: float = _KERNEL_VAR) -> np.ndarray:
     """
     Gaussian checkerboard kernel novelty — FMP Section 4.4.1, Eq. 4.38-4.43.
 
     For each frame n, inner-product of the (2L+1)×(2L+1) diagonal patch with
     kernel K.  Complexity: O(N × (2L+1)²).
 
-    L (half-size in frames) controls the temporal scale of detected boundaries:
-      L=40 frames @ 5 Hz → 8s per side → section-level transitions.
+    The Gaussian taper is defined on coordinates normalised to [-1, 1]
+    (FMP Eq. 4.40): exp(-var·((k/L)² + (l/L)²)), so the taper scale follows
+    the kernel size.  var=1.0 → weight e⁻² at the kernel corners.
+
+    L (half-size in frames) controls the temporal scale of detected
+    boundaries: L=80 frames @ 10 Hz → 8s per side → section-level
+    transitions.
     """
+    N = S.shape[0]
+    if N < 3:
+        return np.zeros(N, dtype=np.float32)
+    # Reflect padding requires pad width < dimension size; clamp for very
+    # short tracks where the requested kernel exceeds the SSM itself.
+    L = min(L, N - 1)
     M = 2 * L + 1
-    k = np.arange(-L, L + 1, dtype=np.float32)
+    k = np.arange(-L, L + 1, dtype=np.float32) / max(L, 1)   # normalised [-1, 1]
     kk, ll = np.meshgrid(k, k, indexing='ij')
 
     K = (np.sign(kk) * np.sign(ll)).astype(np.float32)
-    eps = gamma / max(L, 1)
-    K *= np.exp(-(eps ** 2) * (kk ** 2 + ll ** 2)).astype(np.float32)
+    K *= np.exp(-var * (kk ** 2 + ll ** 2)).astype(np.float32)
     abs_sum = float(np.sum(np.abs(K)))
     if abs_sum > 0:
         K /= abs_sum
 
-    N = S.shape[0]
-    S_pad = np.pad(S.astype(np.float32), L, mode='constant', constant_values=0.0)
-    novelty = np.empty(N, dtype=np.float32)
-    K_flat = K.ravel()
-    for n in range(N):
-        novelty[n] = float(np.dot(K_flat, S_pad[n: n + M, n: n + M].ravel()))
+    # Reflect padding: a mirrored block is symmetric around the edge, so the
+    # checkerboard response stays near zero there instead of spiking against
+    # an artificial constant background.
+    S_pad = np.pad(S.astype(np.float32), L, mode='reflect')
+
+    # Diagonal patches as a zero-copy strided view: patches[n] = S_pad[n:n+M, n:n+M]
+    s0, s1 = S_pad.strides
+    patches = np.lib.stride_tricks.as_strided(
+        S_pad, shape=(N, M, M), strides=(s0 + s1, s0, s1), writeable=False
+    )
+    novelty = np.einsum('nij,ij->n', patches, K).astype(np.float32)
 
     novelty = np.maximum(novelty, 0.0)
+    max_val = float(novelty.max())
+    if max_val > 0:
+        novelty /= max_val
+    return novelty
+
+
+def _structure_feature_novelty(S_thresh: np.ndarray, sigma_time: float = 2.0) -> np.ndarray:
+    """
+    Structure-feature novelty — FMP Section 4.4.2, Eq. 4.44-4.46.
+
+    Builds the circular time-lag matrix L◦(ℓ, n) = S((n+ℓ) mod N, n) from the
+    thresholded SSM and takes the L2 distance between consecutive columns.
+    Unlike the local checkerboard, each column encodes the *global* repetition
+    context of frame n, so boundaries where the repetition pattern changes
+    (e.g. verse→chorus in identical instrumentation) become visible.
+    """
+    N = S_thresh.shape[0]
+    if N < 3:
+        return np.zeros(N, dtype=np.float32)
+
+    rows = (np.arange(N)[:, None] + np.arange(N)[None, :]) % N   # (ℓ, n) → (n+ℓ) mod N
+    L_circ = S_thresh[rows, np.arange(N)[None, :]].astype(np.float32)
+
+    # Light smoothing along time so the column difference reflects structural
+    # change rather than frame-level sparsity noise in the thresholded SSM.
+    if sigma_time > 0:
+        L_circ = gaussian_filter1d(L_circ, sigma=sigma_time, axis=1)
+
+    diff = np.linalg.norm(np.diff(L_circ, axis=1), axis=0)
+    novelty = np.concatenate([[0.0], diff]).astype(np.float32)
     max_val = float(novelty.max())
     if max_val > 0:
         novelty /= max_val
@@ -395,6 +480,76 @@ def _select_n_clusters(X: np.ndarray, max_k: int = 6) -> int:
         except Exception:
             continue
     return best_k
+
+
+def _ssm_segment_labels(
+    S_thresh: np.ndarray,
+    frame_times: np.ndarray,
+    seg_spans: list[tuple[float, float]],
+    fixed_k: int | None = None,
+    max_k: int = 6,
+) -> np.ndarray | None:
+    """
+    Label segments from pairwise SSM similarity (FMP-style grouping).
+
+    Two segments belong to the same section type iff the SSM sub-block
+    spanning them is dense (they repeat each other), so the mean of the
+    thresholded SSM over [seg_i × seg_j] is a direct repetition measure —
+    more reliable than KMeans on hand-crafted descriptor vectors when only
+    ~10 samples exist.  Average-linkage agglomerative clustering on
+    1 − similarity; k chosen by silhouette unless fixed_k is given.
+    Returns None when the structure is degenerate (caller falls back).
+    """
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+    from sklearn.metrics import silhouette_score
+
+    n = len(seg_spans)
+    if n < 3 or S_thresh.shape[0] != frame_times.size:
+        return None
+
+    idxs: list[np.ndarray] = []
+    for t0, t1 in seg_spans:
+        mask = (frame_times >= t0) & (frame_times < t1)
+        if not mask.any():
+            mask = np.zeros(frame_times.size, dtype=bool)
+            mask[int(np.argmin(np.abs(frame_times - (t0 + t1) / 2)))] = True
+        idxs.append(np.where(mask)[0])
+
+    sims = np.zeros((n, n), dtype=np.float32)
+    for i in range(n):
+        for j in range(i, n):
+            block = S_thresh[np.ix_(idxs[i], idxs[j])]
+            sims[i, j] = sims[j, i] = float(block.mean())
+
+    lo, hi = float(sims.min()), float(sims.max())
+    if hi - lo < 1e-6:
+        return None
+    dist = 1.0 - (sims - lo) / (hi - lo)
+    np.fill_diagonal(dist, 0.0)
+
+    try:
+        Z = linkage(squareform(dist, checks=False), method="average")
+    except Exception as exc:
+        logger.warning("SSM segment linkage failed (%s).", exc)
+        return None
+
+    if fixed_k is not None:
+        labels = fcluster(Z, t=min(fixed_k, n), criterion="maxclust") - 1
+        return labels if len(set(labels)) >= 1 else None
+
+    best_labels, best_score = None, -1.0
+    for k in range(2, min(max_k, n - 1) + 1):
+        labels = fcluster(Z, t=k, criterion="maxclust") - 1
+        if len(set(labels)) < 2:
+            continue
+        try:
+            score = float(silhouette_score(dist, labels, metric="precomputed"))
+        except Exception:
+            continue
+        if score > best_score:
+            best_score, best_labels = score, labels
+    return best_labels
 
 
 def _segment_feature_vector(feat: np.ndarray) -> np.ndarray:
@@ -529,10 +684,12 @@ def _cluster_and_label_segments(
     use_mfcc: bool,
     energy_curve: np.ndarray | None = None,
     boundary_metadata: list[dict] | None = None,
+    ssm_thresh: np.ndarray | None = None,
 ) -> list[dict]:
     """
-    Build segments from boundary times, cluster by feature descriptors,
-    assign letter labels (A, B, C …), then assign section types.
+    Build segments from boundary times, label by SSM repetition similarity
+    (KMeans on feature descriptors as fallback), assign letter labels
+    (A, B, C …), then assign section types.
     """
     fallback = [{"start": 0.0, "end": round(total_dur, 2), "label": "A", "section_type": "FullTrack"}]
     if frame_times.size == 0:
@@ -564,19 +721,29 @@ def _cluster_and_label_segments(
     if not seg_vecs:
         return fallback
 
-    X = np.array(seg_vecs, dtype=np.float32)
-    k = _select_n_clusters(X, max_k=min(8, len(seg_vecs))) if auto_n_clusters else min(n_clusters, len(seg_vecs))
-    logger.info("n_clusters=%d (auto=%s, n_segs=%d)", k, auto_n_clusters, len(seg_vecs))
+    labels_arr: np.ndarray | None = None
+    if ssm_thresh is not None:
+        labels_arr = _ssm_segment_labels(
+            ssm_thresh, frame_times, seg_spans,
+            fixed_k=None if auto_n_clusters else min(n_clusters, len(seg_spans)),
+        )
+        if labels_arr is not None:
+            logger.info("SSM-based labels: k=%d, n_segs=%d", len(set(labels_arr)), len(seg_spans))
 
-    if k < 2 or len(seg_vecs) < 2:
-        labels_arr = np.zeros(len(seg_vecs), dtype=int)
-    else:
-        try:
-            km = KMeans(n_clusters=k, random_state=0, n_init=5, init='k-means++')
-            labels_arr = km.fit_predict(X)
-        except Exception as exc:
-            logger.warning("KMeans failed (%s); single cluster.", exc)
+    if labels_arr is None:
+        X = np.array(seg_vecs, dtype=np.float32)
+        k = _select_n_clusters(X, max_k=min(8, len(seg_vecs))) if auto_n_clusters else min(n_clusters, len(seg_vecs))
+        logger.info("KMeans fallback: n_clusters=%d (auto=%s, n_segs=%d)", k, auto_n_clusters, len(seg_vecs))
+
+        if k < 2 or len(seg_vecs) < 2:
             labels_arr = np.zeros(len(seg_vecs), dtype=int)
+        else:
+            try:
+                km = KMeans(n_clusters=k, random_state=0, n_init=5, init='k-means++')
+                labels_arr = km.fit_predict(X)
+            except Exception as exc:
+                logger.warning("KMeans failed (%s); single cluster.", exc)
+                labels_arr = np.zeros(len(seg_vecs), dtype=int)
 
     counts = Counter(int(lbl) for lbl in labels_arr)
     id_to_char = {cid: chr(65 + i) for i, (cid, _) in enumerate(counts.most_common())}
@@ -719,15 +886,16 @@ def _analyze_content(
 
     Accepted params keys (all optional):
       min_segment_duration_seconds  float  default 10.0
-      novelty_kernel_size_seconds   float  default 8.0
-      target_fps                    float  default 5.0
+      novelty_kernel_size_seconds   float  default 8.0  (kernel half-size)
+      target_fps                    float  default 10.0
       n_clusters                    int    default 4
       use_mfcc                      bool   default True
-      mfcc_n_components             int    default 20
+      mfcc_n_components             int    default 20   (MFCC0 dropped internally)
       auto_n_clusters               bool   default True
-      smoothing_L                   int    default 20   (diagonal-smooth frames)
+      smoothing_L                   int    default 14   (diagonal-smooth frames)
       transposition_invariant       bool   default True
       novelty_prominence            float  default 0.18
+      use_beat_sync                 bool   default True (snap boundaries to beats)
       feature_weights               dict   optional multi-feature fusion weights
       timed_lyrics                  list   optional [{time_seconds, text}, ...]
       return_diagnostics            bool   default False
@@ -782,14 +950,21 @@ def _analyze_content(
     )
     logger.info("[%.2fs] Features: n_frames=%d, fps=%.2f", time.perf_counter() - t0, chroma.shape[1], fps)
 
-    # Downsample further if track is very long
+    # Downsample further if track is very long.  Median-pool rather than
+    # stride-decimate: plain `[::step]` aliases the already-pooled features.
     N = chroma.shape[1]
     if N > _MAX_SSM_FRAMES:
         step = int(np.ceil(N / _MAX_SSM_FRAMES))
-        chroma      = chroma[:, ::step]
-        mfcc        = mfcc[:, ::step]
-        frame_times = frame_times[::step]
-        fps         /= step
+        chroma = _median_pool(chroma, step)
+        mfcc   = _median_pool(mfcc,   step)
+        # Pooling breaks the unit norm required for cosine SSMs — re-normalise.
+        for feat in (chroma, mfcc):
+            norms = np.linalg.norm(feat, axis=0, keepdims=True)
+            norms[norms == 0] = 1.0
+            feat /= norms
+        n_pooled = chroma.shape[1]
+        frame_times = frame_times[: n_pooled * step].reshape(n_pooled, step).mean(axis=1)
+        fps /= step
         logger.info("Further downsampled: n_frames=%d (step=%d)", chroma.shape[1], step)
 
     # --- Stage 2+3: Parallel candidate extraction + SSM build ---
@@ -842,16 +1017,31 @@ def _analyze_content(
     )
 
     # --- Stage 4: Enhance SSM ---
+    # Checkerboard novelty runs on the *smoothed* SSM (kept in cosine range);
+    # the thresholded/sparsified version is only used where sparsity helps:
+    # structure features and segment-pair similarity (FMP Eq. 4.17 is a DP
+    # scoring device, not a novelty preprocessing step).
     t0 = time.perf_counter()
-    S_enh = _compute_enhanced_ssm(S_raw, L=smoothing_L, rho=_SSM_RHO, penalty=_SSM_PENALTY)
-    logger.info("[%.2fs] SSM enhanced (L=%d)", time.perf_counter() - t0, smoothing_L)
+    S_smooth = _smooth_ssm(S_raw, L=smoothing_L)
+    S_thresh = _threshold_ssm(S_smooth, rho=_SSM_RHO, delta=0.0)
+    logger.info("[%.2fs] SSM smoothed+thresholded (L=%d)", time.perf_counter() - t0, smoothing_L)
 
     # --- Stage 5: SSM novelty candidates ---
     t0 = time.perf_counter()
     kernel_L = max(8, int(kernel_s * fps))
-    ssm_novelty = _compute_novelty_ssm(S_enh, L=kernel_L)
-    logger.info("[%.2fs] Novelty (kernel_L=%d frames = %.1fs)",
-                time.perf_counter() - t0, kernel_L, kernel_L / fps)
+    s_min, s_max = float(S_smooth.min()), float(S_smooth.max())
+    S_unit = (S_smooth - s_min) / max(s_max - s_min, 1e-8)
+    checkerboard_novelty = _compute_novelty_ssm(S_unit, L=kernel_L)
+    structure_novelty = _structure_feature_novelty(S_thresh)
+    ssm_novelty = (
+        (1.0 - _STRUCTURE_WEIGHT) * checkerboard_novelty
+        + _STRUCTURE_WEIGHT * structure_novelty
+    )
+    max_nov = float(ssm_novelty.max())
+    if max_nov > 0:
+        ssm_novelty = (ssm_novelty / max_nov).astype(np.float32)
+    logger.info("[%.2fs] Novelty (kernel_L=%d frames = %.1fs, structure_w=%.2f)",
+                time.perf_counter() - t0, kernel_L, kernel_L / fps, _STRUCTURE_WEIGHT)
 
     t0 = time.perf_counter()
     ssm_boundaries = find_boundaries(
@@ -864,6 +1054,16 @@ def _analyze_content(
     ssm_candidates = candidates_from_boundaries(ssm_boundaries, "ssm", ssm_novelty, frame_times)
     all_candidates.extend(ssm_candidates)
     logger.info("[%.2fs] SSM candidates=%d", time.perf_counter() - t0, len(ssm_candidates))
+
+    # Beat-phrase grid candidates: sections tend to start on 16/24/32-beat
+    # phrase boundaries; the SSM novelty curve phase-locks the grid.
+    beat_candidates = beat_phrase_boundary_candidates(
+        beat_times, onset_times, onset_env,
+        total_dur=core_dur, min_seg_dur=min_seg_dur,
+        support_times=frame_times, support_curve=ssm_novelty,
+    )
+    all_candidates.extend(beat_candidates)
+    logger.info("Beat-phrase candidates=%d", len(beat_candidates))
 
     # --- Stage 5b: Dynamic weight adaptation ---
     dynamic_weights, source_confidences = _compute_dynamic_weights(
@@ -885,7 +1085,10 @@ def _analyze_content(
 
     # --- Stage 6: Filtering, fusion, and snapping ---
     t0 = time.perf_counter()
-    boundary_budget = max(1, int(core_dur / 12.0) - 1)
+    # One boundary per ~9s on average: SALAMI coarse sections are mostly
+    # 10-25s, but intros/outros and transitions are shorter — a 12s prior
+    # capped recall hard.
+    boundary_budget = max(1, int(core_dur / 9.0) - 1)
     fused_boundaries = fuse_boundary_candidates(
         all_candidates,
         weights=dynamic_weights,
@@ -930,6 +1133,7 @@ def _analyze_content(
         use_mfcc=use_mfcc,
         energy_curve=rms_novelty,
         boundary_metadata=snapped_boundaries,
+        ssm_thresh=S_thresh,
     )
     logger.info("[%.2fs] %d segments after clustering", time.perf_counter() - t0, len(segments_core))
 

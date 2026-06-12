@@ -401,6 +401,8 @@
   // ── Batch Eval ────────────────────────────────────────────────────────────
   let batchOpen        = false;
   let batchMaxTracks   = 20;
+  let batchRunAllDataset = false;
+  let batchConcurrency = 3;
   let batchTolerance   = 0.5;
   let batchRunning     = false;
   let batchLines       = [];
@@ -428,8 +430,9 @@
 
     try {
       const { job_id } = await startBatchEval({
-        maxTracks: batchMaxTracks,
-        toleranceSeconds: batchTolerance,
+        maxTracks: batchRunAllDataset ? 0 : Number(batchMaxTracks),
+        toleranceSeconds: Number(batchTolerance),
+        concurrency: Number(batchConcurrency),
       });
 
       batchUnsub = subscribeToBatchEval(
@@ -745,18 +748,60 @@
 
         <!-- config -->
         <div class="px-5 py-4 border-b border-zinc-800 shrink-0 space-y-4">
-          <div class="flex items-center gap-6">
+          <div class="flex flex-wrap items-end gap-4">
             <div>
-              <label for="batch-max-tracks" class="text-xs font-medium text-zinc-400 block mb-1">Max tracks</label>
+              <label for="batch-max-tracks" class="text-xs font-medium text-zinc-400 block mb-1">Dataset scope</label>
+              <div class="mb-2 grid w-48 grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
+                <button
+                  type="button"
+                  on:click={() => (batchRunAllDataset = false)}
+                  disabled={batchRunning}
+                  class={"rounded-md px-2 py-1 text-[10px] font-semibold transition-colors disabled:opacity-50 " +
+                    (!batchRunAllDataset ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300")}
+                >
+                  Limited
+                </button>
+                <button
+                  type="button"
+                  on:click={() => (batchRunAllDataset = true)}
+                  disabled={batchRunning}
+                  class={"rounded-md px-2 py-1 text-[10px] font-semibold transition-colors disabled:opacity-50 " +
+                    (batchRunAllDataset ? "bg-indigo-500 text-white" : "text-zinc-500 hover:text-zinc-300")}
+                >
+                  All dataset
+                </button>
+              </div>
               <input
                 id="batch-max-tracks"
                 type="number"
                 min="1" max="500"
                 bind:value={batchMaxTracks}
+                disabled={batchRunning || batchRunAllDataset}
+                class="w-24 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label for="batch-concurrency" class="text-xs font-medium text-zinc-400 block mb-1">Concurrency</label>
+              <input
+                id="batch-concurrency"
+                type="number"
+                min="1" max="10"
+                bind:value={batchConcurrency}
                 disabled={batchRunning}
                 class="w-24 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
               />
-              <p class="text-[10px] text-zinc-600 mt-0.5">0 = all tracks</p>
+              <div class="mt-1.5 flex gap-1">
+                {#each [2, 3, 4] as preset}
+                  <button
+                    type="button"
+                    on:click={() => (batchConcurrency = preset)}
+                    disabled={batchRunning}
+                    class="rounded-md border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500 hover:border-zinc-700 hover:text-zinc-300 disabled:opacity-50"
+                  >
+                    {preset}
+                  </button>
+                {/each}
+              </div>
             </div>
             <div>
               <label for="batch-tolerance" class="text-xs font-medium text-zinc-400 block mb-1">
@@ -778,6 +823,8 @@
               {#if batchRunning}
                 <span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-white/80"></span>
                 Running…
+              {:else if batchRunAllDataset}
+                Run All Dataset
               {:else}
                 ▶ Run
               {/if}

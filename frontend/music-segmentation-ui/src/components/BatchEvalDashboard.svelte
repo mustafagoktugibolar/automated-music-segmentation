@@ -4,11 +4,13 @@
 
   // ── Config ────────────────────────────────────────────────────────────────
   let maxTracks = 20;
+  let runAllDataset = false;
   let tolerance = 0.5;
   let concurrency = 3;
   let includeLLM = false;
   let llmMode = "deterministic";
   let showLLMBatchConfirm = false;
+  const WORKER_PRESETS = [2, 3, 4];
 
   // ── Run state ─────────────────────────────────────────────────────────────
   let running = false;
@@ -168,7 +170,7 @@
 
     try {
       const { job_id } = await startBatchEval({
-        maxTracks: Number(maxTracks),
+        maxTracks: runAllDataset ? 0 : Number(maxTracks),
         toleranceSeconds: Number(tolerance),
         concurrency: Number(concurrency),
         includeLLM,
@@ -207,6 +209,11 @@
 
   function toggleSort() {
     sortDir = sortDir === "desc" ? "asc" : "desc";
+  }
+
+  function setWorkerPreset(count) {
+    if (running) return;
+    concurrency = count;
   }
 
   function copyReport() {
@@ -284,7 +291,7 @@
         <div>
           <h3 class="text-sm font-semibold text-zinc-100">Batch Eval with AI Agent</h3>
           <p class="mt-2 text-xs text-zinc-400 leading-relaxed">
-            The AI Agent will run for <strong class="text-amber-300">{maxTracks === 0 ? "all" : maxTracks} tracks</strong>.
+            The AI Agent will run for <strong class="text-amber-300">{runAllDataset ? "all available" : maxTracks} tracks</strong>.
             Each track makes a separate <strong class="text-zinc-200">LLM API call</strong>, which may take time and incur charges.
           </p>
           <p class="mt-1.5 text-[11px] text-zinc-500">Do you want to continue?</p>
@@ -325,18 +332,40 @@
       <!-- Max tracks -->
       <div>
         <label for="batch-max-tracks" class="text-xs font-medium text-zinc-400 block mb-1.5">
-          Max Tracks
+          Dataset scope
         </label>
+        <div class="grid grid-cols-2 gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950 p-1">
+          <button
+            type="button"
+            on:click={() => (runAllDataset = false)}
+            disabled={running}
+            class={"rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
+              (!runAllDataset ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300")}
+          >
+            Limited run
+          </button>
+          <button
+            type="button"
+            on:click={() => (runAllDataset = true)}
+            disabled={running}
+            class={"rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
+              (runAllDataset ? "bg-indigo-500 text-white" : "text-zinc-500 hover:text-zinc-300")}
+          >
+            All dataset
+          </button>
+        </div>
         <input
           id="batch-max-tracks"
           type="number"
           min="1"
           max="500"
           bind:value={maxTracks}
-          disabled={running}
-          class="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={running || runAllDataset}
+          class="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
         />
-        <p class="mt-1 text-[10px] text-zinc-600">0 = all tracks in dataset</p>
+        <p class="mt-1 text-[10px] text-zinc-600">
+          {runAllDataset ? "Runs every available SALAMI track, no cap" : "Use a smaller cap for smoke runs"}
+        </p>
       </div>
 
       <!-- Concurrency -->
@@ -353,7 +382,22 @@
           disabled={running}
           class="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
         />
-        <p class="mt-1 text-[10px] text-zinc-600">Parallel tracks — match worker count</p>
+        <div class="mt-2 grid grid-cols-3 gap-1.5">
+          {#each WORKER_PRESETS as preset}
+            <button
+              type="button"
+              on:click={() => setWorkerPreset(preset)}
+              disabled={running}
+              class={"rounded-lg border px-2 py-1.5 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
+                (Number(concurrency) === preset
+                  ? "border-indigo-500 bg-indigo-500/20 text-indigo-200"
+                  : "border-zinc-800 bg-zinc-950 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300")}
+            >
+              {preset} workers
+            </button>
+          {/each}
+        </div>
+        <p class="mt-1 text-[10px] text-zinc-600">Parallel tracks — match custom worker containers</p>
       </div>
 
       <!-- Tolerance slider -->
@@ -423,6 +467,8 @@
           Running…
         {:else if isDone}
           Run Again
+        {:else if runAllDataset}
+          Run All Dataset
         {:else}
           Run Batch Eval
         {/if}
@@ -564,7 +610,7 @@
               <h2 class="mt-2 text-2xl font-semibold text-zinc-100">No results yet</h2>
               <p class="mt-2 max-w-md text-sm text-zinc-400">
                 Configure max tracks and tolerance in the sidebar, then press
-                <span class="text-zinc-200 font-medium">Run Batch Eval</span> to start evaluating
+                <span class="text-zinc-200 font-medium">{runAllDataset ? "Run All Dataset" : "Run Batch Eval"}</span> to start evaluating
                 the custom algorithm against the full SALAMI dataset.
               </p>
             </div>

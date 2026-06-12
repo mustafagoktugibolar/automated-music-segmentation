@@ -1,0 +1,48 @@
+============================================================
+  SALAMI Batch Evaluation — custom algorithm
+============================================================
+  Tracks attempted : 5
+  Tracks evaluated : 5
+  Errors / skipped : 0
+  Tolerance        : ±0.5s
+
+--- Macro-Averaged Metrics ---
+  Precision : 0.097  (std 0.050)
+  Recall    : 0.157  (std 0.096)
+  F-measure : 0.117  (std 0.064)
+
+--- Boundary Count Analysis ---
+  Avg ref  boundaries : 10.8
+  Avg est  boundaries : 15.0
+  Ratio est/ref       : 1.39  (ok)
+  Avg segmentation    : 8.6s per track
+
+--- Zero-F1 tracks : 1 / 5 ---
+     957  Tip My Glass                              est=9  ref=13
+
+--- Worst 10 tracks (F1) ---
+      ID  Title                                      P       R      F1   est   ref
+  ------------------------------------------------------------------------
+     957  Tip My Glass                           0.000   0.000   0.000     9    13
+     955  Freedom Avenue                         0.111   0.091   0.100     9    11
+     958  Rap Medley                             0.105   0.222   0.143    19     9
+     959  STK                                    0.125   0.250   0.167    24    12
+     956  Revolution                             0.143   0.222   0.174    14     9
+
+--- Best 10 tracks (F1) ---
+      ID  Title                                      P       R      F1   est   ref
+  ------------------------------------------------------------------------
+     956  Revolution                             0.143   0.222   0.174    14     9
+     959  STK                                    0.125   0.250   0.167    24    12
+     958  Rap Medley                             0.105   0.222   0.143    19     9
+     955  Freedom Avenue                         0.111   0.091   0.100     9    11
+     957  Tip My Glass                           0.000   0.000   0.000     9    13
+
+--- F1 Distribution ---
+  0.0-0.2     5  █████
+  0.2-0.4     0  
+  0.4-0.6     0  
+  0.6-0.8     0  
+  0.8-1.0     0  
+
+============================================================

@@ -52,6 +52,32 @@ The entire application stack (backend + database) is managed by Docker Compose.
     Once the services are running, the API will be available at `http://localhost:8000`. You can test it by navigating to:
     `http://localhost:8000/health`
 
+### Full Dataset Batch Evaluation and Custom Worker Scaling
+
+The frontend `Batch Eval` page includes a `Run all dataset` option. It sends `max_tracks=0` to `POST /evaluation/batch`, so the backend evaluates every available SALAMI track found in MinIO with local annotations.
+
+For a 32 GB RAM / 8 core / 16 thread machine, start with four custom worker containers and one active task per container:
+
+```bash
+CUSTOM_WORKER_REPLICAS=4 WORKER_CONCURRENCY=1 docker compose up -d --build
+```
+
+This starts four `worker-custom` service instances, named by Docker Compose as `...worker-custom-1` through `...worker-custom-4`. In the frontend, set batch concurrency to `4` or use the `4 workers` preset.
+
+If CPU stays below roughly 80% and RAM stays below roughly 24 GB during a full run, you can try two tasks per custom worker:
+
+```bash
+CUSTOM_WORKER_REPLICAS=4 WORKER_CONCURRENCY=2 docker compose up -d --build
+```
+
+Then set frontend batch concurrency to `8`. Keep the LLM worker at low concurrency because API latency, rate limits, and cost become the bottleneck.
+
+You can also change the custom worker count without editing `.env`:
+
+```bash
+CUSTOM_WORKER_REPLICAS=2 WORKER_CONCURRENCY=1 docker compose up -d --build
+```
+
 ## API Endpoints
 
 - `POST /segmentation/upload`  

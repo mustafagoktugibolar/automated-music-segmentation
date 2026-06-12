@@ -198,9 +198,11 @@ def beat_phrase_boundary_candidates(
                 local_support = float(support_at_beats[idx])
                 local_onset = min(1.0, float(onset_at_beats[idx]) / max_onset)
                 confidence = 0.40 + 0.40 * local_support + 0.15 * local_onset
+                # Source key must match DEFAULT_FEATURE_WEIGHTS ("beat"),
+                # otherwise these candidates get zero weight in fusion.
                 out.append({
                     "time": round(t, 3),
-                    "source": "beat_phrase",
+                    "source": "beat",
                     "confidence": round(confidence, 3),
                 })
 
@@ -227,8 +229,18 @@ def chord_proxy_boundary_candidates(
     if chroma.shape[1] < 2:
         return [], np.zeros(frame_times.size, dtype=np.float32)
     try:
-        sims = np.sum(chroma[:, 1:] * chroma[:, :-1], axis=0)
-        chord_change = np.concatenate([[0.0], 1.0 - np.clip(sims, -1.0, 1.0)]).astype(np.float32)
+        # CENS is ~1s-smoothed, so adjacent frames at 10 Hz are nearly
+        # identical and their difference is dominated by noise.  Compare
+        # frames ±0.5s around each position instead (centred lag).
+        n = chroma.shape[1]
+        half = max(1, int(round(0.5 * fps)))
+        chord_change = np.zeros(n, dtype=np.float32)
+        if n > 2 * half:
+            sims = np.sum(chroma[:, 2 * half:] * chroma[:, : n - 2 * half], axis=0)
+            chord_change[half: n - half] = 1.0 - np.clip(sims, -1.0, 1.0)
+        else:
+            sims = np.sum(chroma[:, 1:] * chroma[:, :-1], axis=0)
+            chord_change[1:] = 1.0 - np.clip(sims, -1.0, 1.0)
         if chord_change.size > 5:
             chord_change = gaussian_filter1d(chord_change, sigma=2.0)
         novelty = normalise_curve(chord_change)
@@ -314,7 +326,12 @@ def fuse_boundary_candidates(
 
         sources = sorted(best_by_source)
         score = min(1.0, weighted_sum + min(0.15, 0.035 * max(0, len(sources) - 1)))
-        if score >= threshold:
+        # The SSM is the primary structural signal: a confident SSM-only
+        # candidate must survive even when its weighted score falls below
+        # the multi-source agreement threshold.
+        ssm_cand = best_by_source.get("ssm")
+        ssm_strong = ssm_cand is not None and float(ssm_cand.get("confidence", 0.0)) >= 0.5
+        if score >= threshold or ssm_strong:
             anchor = _choose_boundary_anchor(best_by_source, weights)
             fused.append({
                 "time": round(float(anchor["time"]), 3),
@@ -353,7 +370,7 @@ def snap_fused_boundaries(
     beat_times: np.ndarray,
     use_beat_sync: bool,
     onset_window_s: float,
-    beat_window_s: float = 0.35,
+    beat_window_s: float = 0.25,
 ) -> list[dict]:
     onset_threshold = float(np.percentile(onset_env, 75)) if onset_env.size else 0.0
     snapped: list[dict] = []

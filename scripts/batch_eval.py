@@ -44,6 +44,7 @@ ANNOTATIONS_DIR = "/app/data/salami/annotations"
 METADATA_CSV    = "/app/data/salami/metadata/id_index_internetarchive.csv"
 RESULTS_CSV     = "/app/data/eval_results.csv"
 SUMMARY_TXT     = "/app/data/eval_summary.txt"
+AUDIO_CACHE_DIR = "/app/data/audio_cache"
 
 DOWNLOAD_TIMEOUT_S = 90
 WORKER_CONCURRENCY = 3
@@ -90,20 +91,35 @@ def list_annotated_song_ids() -> list[str]:
 
 # ── Audio download ─────────────────────────────────────────────────────────────
 
-def download_audio(url: str, timeout: int = DOWNLOAD_TIMEOUT_S) -> Optional[bytes]:
-    """Download audio from URL, return raw bytes or None on failure."""
+def download_audio(
+    url: str,
+    timeout: int = DOWNLOAD_TIMEOUT_S,
+    cache_key: Optional[str] = None,
+) -> Optional[bytes]:
+    """Download audio from URL (disk-cached by cache_key), return bytes or None."""
     if not url:
         return None
+    cache_path = os.path.join(AUDIO_CACHE_DIR, cache_key) if cache_key else None
+    if cache_path and os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            return f.read()
     try:
         req = urllib.request.Request(
             url,
             headers={"User-Agent": "music-segmentation-eval/1.0"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+            data = resp.read()
     except Exception as exc:
         print(f"    [download error] {exc}", flush=True)
         return None
+    if cache_path and data:
+        os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+        tmp_path = cache_path + ".part"
+        with open(tmp_path, "wb") as f:
+            f.write(data)
+        os.replace(tmp_path, cache_path)
+    return data
 
 
 # ── SALAMI annotation loading ─────────────────────────────────────────────────
@@ -150,7 +166,7 @@ def evaluate_track(
 
     # Download audio
     t_dl = time.perf_counter()
-    audio_bytes = download_audio(url)
+    audio_bytes = download_audio(url, cache_key=f"{song_id}.mp3")
     dl_time = time.perf_counter() - t_dl
     if audio_bytes is None:
         return {"song_id": song_id, "title": title, "error": "download_failed", "dl_time_s": dl_time}

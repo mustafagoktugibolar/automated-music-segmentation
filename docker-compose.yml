@@ -71,6 +71,7 @@ services:
       music_segmentation_rabbitmq:
         condition: service_healthy
   worker-custom:
+    scale: ${CUSTOM_WORKER_REPLICAS:-4}
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -87,6 +88,10 @@ services:
       WORKER_TYPE: custom_segmentation
       MESSAGE_CODE: segmentation.custom
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-1}
+      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-1}
+      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-1}
+      NUMEXPR_NUM_THREADS: ${NUMEXPR_NUM_THREADS:-1}
     depends_on:
       - music_segmentation_rabbitmq
   worker-msaf-foote:
@@ -262,6 +267,17 @@ services:
       - ./data:/app/data
     restart: "no"
     command: ["python", "main.py", "--concurrency", "5"]
+  frontend:
+    container_name: music_segmentation_frontend
+    build:
+      context: ./frontend/music-segmentation-ui
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:8000}
+    ports:
+      - "5173:80"
+    depends_on:
+      - music_segmentation_backend
 volumes:
   postgres_data: null
   rabbitmq_data: null

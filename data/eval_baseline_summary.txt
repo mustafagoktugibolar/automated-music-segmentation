@@ -1,0 +1,73 @@
+============================================================
+  SALAMI Batch Evaluation — custom algorithm
+============================================================
+  Tracks attempted : 80
+  Tracks evaluated : 14
+  Errors / skipped : 66
+  Tolerance        : ±0.5s
+
+--- Macro-Averaged Metrics ---
+  Precision : 0.081  (std 0.063)
+  Recall    : 0.090  (std 0.085)
+  F-measure : 0.081  (std 0.066)
+
+--- Boundary Count Analysis ---
+  Avg ref  boundaries : 11.7
+  Avg est  boundaries : 11.0
+  Ratio est/ref       : 0.94  (ok)
+  Avg segmentation    : 6.6s per track
+
+--- Zero-F1 tracks : 4 / 14 ---
+     957  Tip My Glass                              est=13  ref=13
+    1006  The Navy Song                             est=9  ref=16
+    1013  Those Get Me Outta Here Blues             est=10  ref=14
+    1048  7 Escape Artist                           est=5  ref=8
+
+--- Worst 10 tracks (F1) ---
+      ID  Title                                      P       R      F1   est   ref
+  ------------------------------------------------------------------------
+     957  Tip My Glass                           0.000   0.000   0.000    13    13
+    1006  The Navy Song                          0.000   0.000   0.000     9    16
+    1013  Those Get Me Outta Here Blues          0.000   0.000   0.000    10    14
+    1048  7 Escape Artist                        0.000   0.000   0.000     5     8
+     992  Mexican Radio                          0.083   0.062   0.071    12    16
+    1038  ShimSham Honey                         0.067   0.083   0.074    15    12
+    1046  People                                 0.125   0.062   0.083     8    16
+     971  Figure It Out                          0.071   0.111   0.087    14     9
+     967  Europa  Baby >                         0.111   0.077   0.091     9    13
+     965  The Unwanted Brother                   0.083   0.125   0.100    12     8
+
+--- Best 10 tracks (F1) ---
+      ID  Title                                      P       R      F1   est   ref
+  ------------------------------------------------------------------------
+     959  STK                                    0.200   0.250   0.222    15    12
+     973  Blue Veins                             0.143   0.286   0.191    14     7
+    1032  CBC Demo 1 d2t2 you give hate          0.167   0.083   0.111     6    12
+     965  The Unwanted Brother                   0.083   0.125   0.100    12     8
+    1050  Going Up the Country ** %              0.083   0.125   0.100    12     8
+     967  Europa  Baby >                         0.111   0.077   0.091     9    13
+     971  Figure It Out                          0.071   0.111   0.087    14     9
+    1046  People                                 0.125   0.062   0.083     8    16
+    1038  ShimSham Honey                         0.067   0.083   0.074    15    12
+     992  Mexican Radio                          0.083   0.062   0.071    12    16
+
+--- F1 Distribution ---
+  0.0-0.2    13  █████████████
+  0.2-0.4     1  █
+  0.4-0.6     0  
+  0.6-0.8     0  
+  0.8-1.0     0  
+
+--- Errors ---
+     956  download_failed
+     955  download_failed
+     958  download_failed
+     962  download_failed
+     963  download_failed
+     964  download_failed
+     968  download_failed
+     970  download_failed
+     960  download_failed
+     972  download_failed
+  ... and 56 more
+============================================================

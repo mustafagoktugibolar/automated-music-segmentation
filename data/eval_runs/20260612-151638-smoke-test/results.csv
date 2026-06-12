@@ -1,0 +1,6 @@
+song_id,title,duration_s,n_ref,n_est,precision,recall,f_measure,annotator,tolerance_s,seg_time_s,n_segments,audio_path,error
+955,Freedom Avenue,266.41,11,9,0.1111,0.0909,0.1,1,0.5,8.01,10,/app/media/uploads/37d51e97-7715-4e54-a24b-b22f5e0cddc6_955.mp3,
+956,Revolution,320.09,9,14,0.1429,0.2222,0.1739,1,0.5,8.58,15,/app/media/uploads/71c5d401-7dde-4c7e-996a-3ebe6dd1d5a5_956.mp3,
+957,Tip My Glass,290.16,13,9,0.0,0.0,0.0,1,0.5,8.28,10,/app/media/uploads/f1354714-6785-4584-8f7f-c8e04109550f_957.mp3,
+958,Rap Medley,344.0,9,19,0.1053,0.2222,0.1429,1,0.5,7.24,20,/app/media/uploads/eeab1543-e95e-4d0b-952e-1db2ceabcbd2_958.mp3,
+959,STK,674.31,12,24,0.125,0.25,0.1667,1,0.5,10.8,25,/app/media/uploads/5ff2a14c-b3b1-42a4-b3e5-1e01be7e3c2c_959.mp3,
