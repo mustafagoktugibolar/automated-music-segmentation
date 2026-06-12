@@ -113,3 +113,39 @@ The process is broken down into the following key steps:
 5.  **Segment Clustering & Labeling (Optional)**
     *   **What:** After identifying the segments, we can group similar-sounding segments together.
     *   **How:** By analyzing the features within each segment, we can cluster them. For example, all segments corresponding to the chorus should have similar features and will be grouped into the same cluster, which can then be labeled "Chorus".
+
+## Evaluation Metrics
+
+Segmentation quality is measured by comparing predicted boundaries against human-annotated ground truth boundaries (SALAMI dataset) using `mir_eval`.
+
+### Tolerance
+The time window (in seconds) within which a predicted boundary must fall to be counted as a correct detection. Two standard tolerances are used:
+- **±0.5s** — strict: rewards precise boundary placement
+- **±3s** — lenient: rewards finding the right region even if timing is slightly off
+
+### Precision
+Of all boundaries **predicted** by the algorithm, the fraction that are within tolerance of a true boundary.
+
+```
+Precision = True Positives / (True Positives + False Positives)
+```
+
+A low precision means the algorithm is over-segmenting — predicting boundaries that don't correspond to real structural changes.
+
+### Recall
+Of all **annotated** ground-truth boundaries, the fraction that were successfully detected by the algorithm.
+
+```
+Recall = True Positives / (True Positives + False Negatives)
+```
+
+A low recall means the algorithm is under-segmenting — missing real structural boundaries.
+
+### F1
+The harmonic mean of Precision and Recall. This is the primary summary metric.
+
+```
+F1 = 2 × (Precision × Recall) / (Precision + Recall)
+```
+
+F1 balances both concerns: an algorithm that predicts a boundary every 0.1 seconds achieves perfect recall but near-zero precision, and F1 penalizes this. A good segmentation algorithm needs both.

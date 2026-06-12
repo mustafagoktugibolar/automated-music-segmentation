@@ -5,7 +5,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-ALLOWED_ALGORITHMS = ("custom", "foote", "cnmf", "scluster")
+ALLOWED_ALGORITHMS = ("custom", "foote", "cnmf", "scluster", "llm")
+
+
+class TimedLyricLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    time_seconds: float = Field(ge=0)
+    text: str = Field(min_length=1)
 
 
 class CustomSegmentationParams(BaseModel):
@@ -19,6 +26,9 @@ class CustomSegmentationParams(BaseModel):
     mfcc_n_components: int | None = Field(default=None, ge=1, le=40)
     # Novelty blending
     spectral_flux_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    feature_weights: dict[str, float] | None = None
+    timed_lyrics: list[TimedLyricLine] | None = None
+    return_diagnostics: bool | None = None
     # Clustering
     auto_n_clusters: bool | None = None
     # New: beat-sync and SSM enhancement controls
@@ -34,18 +44,25 @@ class MSAFSegmentationParams(BaseModel):
     hier: bool | None = None
 
 
+class LLMSegmentationParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["deterministic", "ai_generated"] | None = Field(default=None)
+
+
 class SegmentationParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     custom: CustomSegmentationParams | None = None
     msaf: MSAFSegmentationParams | None = None
+    llm_segmentation: LLMSegmentationParams | None = None
 
 
 class StorageSegmentationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     song_id: str = Field(min_length=1)
-    algorithms: list[Literal["custom", "foote", "cnmf", "scluster"]] = Field(min_length=1)
+    algorithms: list[Literal["custom", "foote", "cnmf", "scluster", "llm"]] = Field(min_length=1)
     params: SegmentationParams | None = None
 
 

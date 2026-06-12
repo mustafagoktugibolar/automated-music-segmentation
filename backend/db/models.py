@@ -94,3 +94,25 @@ class EvaluationRun(Base):
     tolerance_seconds = Column(Float, default=3.0, nullable=False)
     metrics = Column(JSON, nullable=False)  # {precision, recall, f_measure, n_ref, n_est}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class BatchEvalJob(Base):
+    """Persisted batch evaluation run with aggregated results."""
+
+    __tablename__ = "batch_eval_jobs"
+
+    job_id = Column(String, primary_key=True, index=True)
+    status = Column(String, default="running", nullable=False)  # running | completed | failed
+    max_tracks = Column(Integer, nullable=False)
+    tolerance_seconds = Column(Float, nullable=False)
+    concurrency = Column(Integer, nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    summary = Column(Text, nullable=True)
+    rows = Column(JSON, default=[])  # [{song_id, title, n_ref, n_est, precision, recall, f_measure, error}]
+    error = Column(String, nullable=True)
+    tracks_ok = Column(Integer, nullable=True)
+    tracks_total = Column(Integer, nullable=True)
+    avg_precision = Column(Float, nullable=True)
+    avg_recall = Column(Float, nullable=True)
+    avg_f1 = Column(Float, nullable=True)

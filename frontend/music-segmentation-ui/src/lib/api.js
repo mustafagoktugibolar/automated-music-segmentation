@@ -3,7 +3,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
 /**
  * @typedef {{ task_id: string, status: string, worker_type?: string, algorithm?: string, segments?: Array<Record<string, unknown>>, results?: Record<string, unknown>, error?: string }} TaskMessage
  * @typedef {{ file: File, groundTruthCsv?: File | null, title?: string | null, artist?: string | null }} UploadTrackOptions
- * @typedef {{ file: File, algorithms: string[], webhook_url?: string | null }} UploadSegmentationOptions
+ * @typedef {{ file: File, algorithms: string[], webhook_url?: string | null, params?: Record<string, unknown> | null }} UploadSegmentationOptions
  * @typedef {{ audioSource: { type: string, value: string }, params?: Record<string, unknown> }} TestAlgorithmOptions
  */
 
@@ -234,13 +234,39 @@ export function getEvaluation(evalId) {
 }
 
 /**
- * @param {{ maxTracks?: number, toleranceSeconds?: number }} options
+ * @param {{ maxTracks?: number, toleranceSeconds?: number, concurrency?: number, includeLLM?: boolean, llmMode?: string }} options
  */
-export function startBatchEval({ maxTracks = 20, toleranceSeconds = 0.5 } = {}) {
+export function startBatchEval({
+  maxTracks = 20,
+  toleranceSeconds = 0.5,
+  concurrency = 3,
+  includeLLM = false,
+  llmMode = "deterministic",
+} = {}) {
   return apiFetch("/evaluation/batch", {
     method: "POST",
-    ...jsonBody({ max_tracks: maxTracks, tolerance_seconds: toleranceSeconds }),
+    ...jsonBody({
+      max_tracks: maxTracks,
+      tolerance_seconds: toleranceSeconds,
+      concurrency,
+      include_llm: includeLLM,
+      llm_mode: llmMode,
+    }),
   });
+}
+
+/**
+ * @param {{ limit?: number }} [options]
+ */
+export function listBatchEvalHistory({ limit = 30 } = {}) {
+  return apiFetch(`/evaluation/batch/history?limit=${limit}`);
+}
+
+/**
+ * @param {string} jobId
+ */
+export function getBatchEvalResult(jobId) {
+  return apiFetch(`/evaluation/batch/${jobId}/result`);
 }
 
 /**
@@ -275,10 +301,13 @@ export function subscribeToBatchEval(jobId, onLine, onDone) {
 /**
  * @param {UploadSegmentationOptions} options
  */
-export async function uploadSegmentation({ file, algorithms, webhook_url = null }) {
+export async function uploadSegmentation({ file, algorithms, webhook_url = null, params = null }) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("algorithms", JSON.stringify(algorithms));
+  if (params) {
+    formData.append("params", JSON.stringify(params));
+  }
   if (webhook_url) {
     formData.append("webhook_url", webhook_url);
   }

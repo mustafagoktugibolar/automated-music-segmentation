@@ -96,6 +96,14 @@ class ResultListener:
 
                 current_results = dict(task.results) if task.results else {}
                 current_results[key] = segments
+                # Preserve LLM-specific metadata so the frontend can display
+                # the agent explanation alongside the standard segments list.
+                if data.get("agent_explanation"):
+                    current_results[f"{key}__explanation"] = data["agent_explanation"]
+                if data.get("evaluation"):
+                    current_results[f"{key}__evaluation"] = data["evaluation"]
+                if data.get("processing_time_seconds") is not None:
+                    current_results[f"{key}__processing_time"] = data["processing_time_seconds"]
                 task.results = current_results
 
                 expected = {str(a).lower().strip() for a in (task.expected_algorithms or [])}

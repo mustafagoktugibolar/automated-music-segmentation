@@ -32,10 +32,14 @@ class CustomWorker(BaseWorker):
         result = process_file_path(file_path, params=params)
         logger.info(f"Custom segmentation finished for {task_id}")
 
-        return {
+        response = {
             "task_id": task_id,
             "status": "completed",
             "worker_type": "custom",
             "algorithm": "custom",
             "segments": result.get("segments", []),
         }
+        for key in ("estimated_bpm", "candidate_boundaries", "diagnostics"):
+            if key in result:
+                response[key] = result[key]
+        return response

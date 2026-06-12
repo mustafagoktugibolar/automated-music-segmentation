@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 import os
 import signal
 import sys
+import time
 
 from shared.blob_helper import AzureBlobCacheHelper
 from shared.logger import get_logger
@@ -17,6 +19,8 @@ class BaseWorker(ABC):
         self.routing_keys = routing_keys
         self.rabbitmq = RabbitMQClient(service_name=service_name)
         self._blob_helper = None
+        self._concurrency = int(os.getenv("WORKER_CONCURRENCY", "1"))
+        self._executor = ThreadPoolExecutor(max_workers=self._concurrency)
 
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
@@ -54,33 +58,53 @@ class BaseWorker(ABC):
         raise ValueError(f"Unsupported source_type={source_type}")
 
     def _callback(self, ch, method, properties, body):
-        logger.info(f"[{self.service_name}] Processing task...")
-        try:
-            result = self.process_task(body)
+        # Return immediately so pika's event loop isn't blocked.
+        # Ack/nack are posted back to pika's thread via add_callback_threadsafe,
+        # which is the only thread-safe way to call channel methods from threads.
+        def _run():
+            try:
+                t_start = time.perf_counter()
+                result = self.process_task(body)
+                processing_time = round(time.perf_counter() - t_start, 3)
 
-            if result:
-                self.rabbitmq.publish(
-                    exchange="segmentation_topic",
-                    routing_key="segmentation.result",
-                    message=result,
+                if result:
+                    result["processing_time_seconds"] = processing_time
+
+                def _ack_and_publish():
+                    try:
+                        if result:
+                            self.rabbitmq.publish(
+                                exchange="segmentation_topic",
+                                routing_key="segmentation.result",
+                                message=result,
+                            )
+                    finally:
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                        logger.info(f"[{self.service_name}] Task completed and acked.")
+
+                self.rabbitmq.connection.add_callback_threadsafe(_ack_and_publish)
+
+            except Exception:
+                logger.error(f"[{self.service_name}] Task processing failed", exc_info=True)
+                self.rabbitmq.connection.add_callback_threadsafe(
+                    lambda: ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 )
 
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info(f"[{self.service_name}] Task completed and acked.")
-
-        except Exception:
-            logger.error(f"[{self.service_name}] Task processing failed", exc_info=True)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        self._executor.submit(_run)
 
     def start(self):
-        logger.info(f"[{self.service_name}] Starting worker...")
+        logger.info(
+            f"[{self.service_name}] Starting worker (concurrency={self._concurrency})..."
+        )
         self.rabbitmq.consume(
             queue_name=self.queue_name,
             routing_keys=self.routing_keys,
             callback=self._callback,
+            prefetch_count=self._concurrency,
         )
 
     def shutdown(self, signum, frame):
         logger.info(f"[{self.service_name}] Shutting down...")
+        self._executor.shutdown(wait=False)
         self.rabbitmq.close()
         sys.exit(0)

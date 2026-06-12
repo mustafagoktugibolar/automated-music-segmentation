@@ -63,7 +63,7 @@ class RabbitMQClient:
                 properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
             )
 
-    def consume(self, queue_name: str, routing_keys: list[str], callback: Callable, exchange: str = "segmentation_topic"):
+    def consume(self, queue_name: str, routing_keys: list[str], callback: Callable, exchange: str = "segmentation_topic", prefetch_count: int = 1):
         if not self.connection or self.connection.is_closed:
             self.connect()
 
@@ -73,7 +73,7 @@ class RabbitMQClient:
             self.channel.queue_bind(exchange=exchange, queue=queue_name, routing_key=key)
             logger.info(f"[{self.service_name}] Bound queue {queue_name} to key {key}")
 
-        self.channel.basic_qos(prefetch_count=1)
+        self.channel.basic_qos(prefetch_count=prefetch_count)
 
         def on_message(ch, method, properties, body):
             try:

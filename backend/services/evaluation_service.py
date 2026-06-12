@@ -13,12 +13,13 @@ from __future__ import annotations
 import numpy as np
 
 
-def _extract_boundaries(segments: list[dict]) -> np.ndarray:
+def _extract_boundaries(segments: list[dict], edge_margin: float = 2.0) -> np.ndarray:
     """
     Extract unique boundary timestamps from a list of segments.
 
-    The start of each segment is a boundary. Boundaries at t=0 are excluded
-    (they represent the implicit song start, not a structural change).
+    The start of each non-initial segment is a boundary. The first annotated
+    start and near-edge starts are excluded because they represent track
+    alignment/silence markers rather than internal structural changes.
 
     Args:
         segments: List of {start, end, label} dicts.
@@ -26,9 +27,23 @@ def _extract_boundaries(segments: list[dict]) -> np.ndarray:
     Returns:
         Sorted numpy array of boundary timestamps (seconds).
     """
+    ordered = sorted(
+        segments,
+        key=lambda seg: float(seg.get("start", 0) or 0),
+    )
+    if len(ordered) <= 1:
+        return np.array([])
+
+    track_end = max(float(seg.get("end", 0) or 0) for seg in ordered)
     boundaries = set()
-    for seg in segments:
+    for idx, seg in enumerate(ordered):
+        if idx == 0:
+            continue
         start = float(seg.get("start", 0))
+        if start <= edge_margin:
+            continue
+        if track_end > 0 and start >= track_end - edge_margin:
+            continue
         if start > 0.0:
             boundaries.add(start)
     return np.array(sorted(boundaries))
@@ -56,6 +71,42 @@ def _greedy_match(ref: np.ndarray, est: np.ndarray, tolerance: float) -> tuple[i
                 break
 
     return tp, len(ref), len(est)
+
+
+def compute_segment_iou(
+    ref_segments: list[dict],
+    est_segments: list[dict],
+) -> float:
+    """
+    Mean segment IoU (label-agnostic).
+
+    For each reference segment, find the estimated segment with the greatest
+    temporal overlap and compute IoU = overlap / union.  The mean over all
+    reference segments is returned.
+
+    This is the temporal analogue of mean-IoU used in image segmentation.
+    """
+    if not ref_segments or not est_segments:
+        return 0.0
+
+    ious: list[float] = []
+    for ref in ref_segments:
+        rs = float(ref.get("start", 0) or 0)
+        re = float(ref.get("end", 0) or 0)
+        ref_dur = re - rs
+        if ref_dur <= 0:
+            continue
+        best_iou = 0.0
+        for est in est_segments:
+            es = float(est.get("start", 0) or 0)
+            ee = float(est.get("end", 0) or 0)
+            overlap = max(0.0, min(re, ee) - max(rs, es))
+            union = ref_dur + (ee - es) - overlap
+            if union > 0:
+                best_iou = max(best_iou, overlap / union)
+        ious.append(best_iou)
+
+    return round(float(np.mean(ious)), 4) if ious else 0.0
 
 
 def compute_boundary_metrics(
@@ -123,6 +174,7 @@ def compute_boundary_metrics(
         "precision": round(float(precision), 4),
         "recall": round(float(recall), 4),
         "f_measure": round(float(f_measure), 4),
+        "segment_iou": compute_segment_iou(ref_segments, est_segments),
         "n_boundaries_ref": int(len(ref_boundaries)),
         "n_boundaries_est": int(len(est_boundaries)),
         "tolerance_seconds": tolerance,

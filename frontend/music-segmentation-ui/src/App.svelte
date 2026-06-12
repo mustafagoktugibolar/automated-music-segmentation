@@ -4,6 +4,7 @@
   import AlgorithmStudio from "./components/AlgorithmStudio.svelte";
   import DatasetManager from "./components/DatasetManager.svelte";
   import EvaluationDashboard from "./components/EvaluationDashboard.svelte";
+  import BatchEvalDashboard from "./components/BatchEvalDashboard.svelte";
 
   let currentPage = "segmentation";
 
@@ -12,6 +13,7 @@
     { id: "studio", label: "Algorithm Studio" },
     { id: "datasets", label: "Datasets" },
     { id: "evaluation", label: "Evaluation" },
+    { id: "batch-eval", label: "Batch Eval" },
   ];
   import { Button } from "src/lib/components/ui/button";
   import * as Card from "src/lib/components/ui/card";
@@ -26,14 +28,19 @@
   import { Separator } from "src/lib/components/ui/separator";
 
   const ALL_ALGOS = [
-    { id: "custom", label: "Custom", hint: "Optimized baseline" },
-    { id: "foote", label: "Foote", hint: "MSAF algorithm" },
-    { id: "cnmf", label: "CNMF", hint: "MSAF algorithm" },
-    { id: "scluster", label: "S-Cluster", hint: "MSAF algorithm" },
+    { id: "custom",   label: "Custom",    hint: "Optimized baseline",          isLLM: false },
+    { id: "foote",    label: "Foote",     hint: "MSAF algorithm",              isLLM: false },
+    { id: "cnmf",     label: "CNMF",      hint: "MSAF algorithm",              isLLM: false },
+    { id: "scluster", label: "S-Cluster", hint: "MSAF algorithm",              isLLM: false },
+    { id: "llm",      label: "AI Agent",  hint: "LangChain · LLM calls billed", isLLM: true },
   ];
 
   let file = null;
-  let selected = new Set(["custom", "foote", "cnmf", "scluster"]);
+  let selected = new Set(["custom"]);
+  let llmMode = "deterministic";
+
+  // Confirmation modal for LLM
+  let showLLMConfirm = false;
 
   let isUploading = false;
   let taskId = "";
@@ -83,6 +90,15 @@
     return "neutral";
   }
 
+  function handleStartClick() {
+    if (selected.has("llm") && !showLLMConfirm) {
+      showLLMConfirm = true;
+    } else {
+      showLLMConfirm = false;
+      startProcess();
+    }
+  }
+
   async function startProcess() {
     errorMsg = "";
 
@@ -106,12 +122,16 @@
     rawStatus = {};
     requested = algos;
 
+    const params = selected.has("llm")
+      ? { llm_segmentation: { mode: llmMode } }
+      : null;
+
     isUploading = true;
     status = "uploading";
     statusText = "Uploading…";
 
     try {
-      taskId = await uploadSegmentation({ file, algorithms: algos });
+      taskId = await uploadSegmentation({ file, algorithms: algos, params });
 
       isUploading = false;
       status = "processing";
@@ -209,6 +229,8 @@
     <DatasetManager />
   {:else if currentPage === "evaluation"}
     <EvaluationDashboard />
+  {:else if currentPage === "batch-eval"}
+    <BatchEvalDashboard />
   {:else}
 
   <div class="mx-auto max-w-5xl px-4 py-10">
@@ -388,13 +410,30 @@
           <div class="mt-3 text-[11px] text-zinc-500">
             Selected: {Array.from(selected).join(", ") || "none"}
           </div>
+
+            {#if selected.has("llm")}
+              <div class="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3">
+                <label class="text-xs font-medium text-zinc-300" for="llm-mode">AI Agent mode</label>
+                <select
+                  id="llm-mode"
+                  class="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                  bind:value={llmMode}
+                >
+                  <option value="deterministic">Deterministic</option>
+                  <option value="ai_generated">AI generated</option>
+                </select>
+                <p class="mt-2 text-[11px] text-zinc-500">
+                  Deterministic keeps the existing pipeline. AI generated lets the LLM choose which candidate source families to run.
+                </p>
+              </div>
+            {/if}
         </div>
 
         <!-- Actions -->
         <div class="mt-6 grid gap-2">
           <button
             class="inline-flex items-center justify-center rounded-2xl bg-indigo-500 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-zinc-700"
-            on:click={startProcess}
+            on:click={handleStartClick}
             disabled={isUploading || status === "processing"}
           >
             {#if isUploading}
@@ -450,34 +489,80 @@
           </div>
         {:else}
           <div class="mt-6 grid gap-4 lg:grid-cols-2">
-            {#each Object.keys(results) as algo}
-              <details
-                class="group self-start rounded-2xl border border-zinc-800 bg-zinc-950"
-              >
-                <summary
-                  class="flex self-start cursor-pointer list-none items-center justify-between gap-3 px-4 py-3"
-                >
-                  <div class="flex items-center gap-3">
-                    <div class="h-2 w-2 rounded-full bg-indigo-400/80"></div>
-                    <div class="text-sm font-semibold text-zinc-200">
-                      {algo.toUpperCase()}
+            {#each Object.keys(results).filter(k => !k.endsWith("__explanation") && !k.endsWith("__evaluation")) as algo}
+              {#if algo === "llm"}
+                <!-- ── AI Agent rich result card ── -->
+                <div class="self-start rounded-2xl border border-indigo-800/50 bg-zinc-950 lg:col-span-2">
+                  <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-indigo-800/30">
+                    <div class="flex items-center gap-3">
+                      <div class="h-2 w-2 rounded-full bg-indigo-400"></div>
+                      <div class="text-sm font-semibold text-zinc-200">AI Agent</div>
+                      <span class="rounded-full border border-indigo-800/60 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-300">LLM</span>
+                      <span class="text-xs text-zinc-500">{(results[algo] || []).length} segments</span>
                     </div>
+                    {#if results["llm__evaluation"]?.boundary_f_measure != null}
+                      <span class="text-xs font-semibold tabular-nums
+                        {results['llm__evaluation'].boundary_f_measure >= 0.7 ? 'text-emerald-400' :
+                         results['llm__evaluation'].boundary_f_measure >= 0.5 ? 'text-amber-400' : 'text-red-400'}">
+                        F1 {(results["llm__evaluation"].boundary_f_measure * 100).toFixed(1)}%
+                      </span>
+                    {/if}
                   </div>
-                  <div class="text-xs text-zinc-500 group-open:hidden">
-                    Click to expand
-                  </div>
-                  <div class="text-xs text-zinc-500 hidden group-open:block">
-                    Click to collapse
-                  </div>
-                </summary>
 
-                <div class="border-t border-zinc-800 px-4 py-4">
-                  <pre
-                    class="max-h-[420px] overflow-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-xs text-zinc-200">
-{JSON.stringify(results[algo], null, 2)}
-                  </pre>
+                  {#if results["llm__explanation"]}
+                    <div class="px-4 py-3 border-b border-zinc-800/60 bg-indigo-500/5">
+                      <p class="text-[10px] font-semibold uppercase tracking-widest text-indigo-400 mb-1">Agent Explanation</p>
+                      <p class="text-sm text-zinc-300 leading-relaxed">{results["llm__explanation"]}</p>
+                    </div>
+                  {/if}
+
+                  <div class="px-4 py-3 space-y-2">
+                    {#each (results[algo] || []) as seg, i}
+                      <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2.5">
+                        <div class="flex items-center justify-between gap-2">
+                          <div class="flex items-center gap-2">
+                            <span class="font-mono text-xs text-zinc-500">
+                              {String(Math.floor(seg.start / 60)).padStart(2,"0")}:{String(Math.floor(seg.start % 60)).padStart(2,"0")}
+                              –
+                              {String(Math.floor(seg.end / 60)).padStart(2,"0")}:{String(Math.floor(seg.end % 60)).padStart(2,"0")}
+                            </span>
+                            <span class="rounded-full bg-indigo-500/15 px-2 py-0.5 text-xs font-semibold text-indigo-300">{seg.label}</span>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            {#if seg.source_features?.length}
+                              <span class="text-[10px] text-zinc-600">{seg.source_features.join(", ")}</span>
+                            {/if}
+                            {#if seg.confidence != null}
+                              <span class="text-[10px] font-medium tabular-nums
+                                {seg.confidence >= 0.7 ? 'text-emerald-500' : seg.confidence >= 0.5 ? 'text-amber-500' : 'text-zinc-500'}">
+                                {(seg.confidence * 100).toFixed(0)}%
+                              </span>
+                            {/if}
+                          </div>
+                        </div>
+                        {#if seg.reason}
+                          <p class="mt-1 text-[11px] text-zinc-500 leading-snug">{seg.reason}</p>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
                 </div>
-              </details>
+              {:else}
+                <!-- ── Standard algorithm result card ── -->
+                <details class="group self-start rounded-2xl border border-zinc-800 bg-zinc-950">
+                  <summary class="flex self-start cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                    <div class="flex items-center gap-3">
+                      <div class="h-2 w-2 rounded-full bg-indigo-400/80"></div>
+                      <div class="text-sm font-semibold text-zinc-200">{algo.toUpperCase()}</div>
+                    </div>
+                    <div class="text-xs text-zinc-500 group-open:hidden">Click to expand</div>
+                    <div class="text-xs text-zinc-500 hidden group-open:block">Click to collapse</div>
+                  </summary>
+                  <div class="border-t border-zinc-800 px-4 py-4">
+                    <pre class="max-h-[420px] overflow-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-xs text-zinc-200">{JSON.stringify(results[algo], null, 2)}</pre>
+                  </div>
+                </details>
+              {/if}
             {/each}
           </div>
         {/if}
@@ -503,5 +588,41 @@
       Built with Svelte + Tailwind.
     </footer>
   </div>
+  {/if}
+
+  <!-- ── LLM confirmation modal (rendered outside the page div, works because position:fixed) ── -->
+  {#if showLLMConfirm}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div class="w-full max-w-sm rounded-3xl border border-amber-800/50 bg-zinc-950 p-6 shadow-2xl shadow-black/40">
+        <div class="flex items-start gap-3">
+          <div class="shrink-0 rounded-xl border border-amber-800/40 bg-amber-500/10 p-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-zinc-100">AI Agent selected</h3>
+            <p class="mt-1.5 text-xs text-zinc-400 leading-relaxed">
+              <strong class="text-zinc-200">AI Agent (LLM)</strong> was selected. This algorithm makes an <strong class="text-amber-300">API call</strong> each time it runs and may incur charges.
+            </p>
+            <p class="mt-1 text-xs text-zinc-500">Provider: <span class="text-zinc-300">LLM_PROVIDER env</span></p>
+          </div>
+        </div>
+        <div class="mt-5 flex gap-2">
+          <button
+            class="flex-1 rounded-2xl border border-zinc-800 bg-zinc-900 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
+            on:click={() => (showLLMConfirm = false)}
+          >
+            Cancel
+          </button>
+          <button
+            class="flex-1 rounded-2xl bg-indigo-500 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
+            on:click={() => { showLLMConfirm = false; startProcess(); }}
+          >
+            Yes, continue
+          </button>
+        </div>
+      </div>
+    </div>
   {/if}
 </main>

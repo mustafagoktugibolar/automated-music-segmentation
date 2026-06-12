@@ -12,18 +12,18 @@ import asyncio
 import csv
 import json
 import os
-import threading
 import time
 import urllib.request
 import uuid
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from backend.db.models import DatasetTrack, EvaluationRun, SegmentationTask
+from backend.db.models import BatchEvalJob, DatasetTrack, EvaluationRun, SegmentationTask
 from backend.db.postgreSQL import SessionLocal
 from backend.services.evaluation_service import compute_boundary_metrics
 from backend.services.salami_parser import parse_salami_annotation
@@ -84,7 +84,64 @@ def _download_audio(url: str, timeout: int = 90) -> Optional[bytes]:
         return None
 
 
-def _dispatch_to_worker(audio_bytes: bytes, filename: str) -> str:
+def _minio_client():
+    """Return a boto3 S3 client pointed at MinIO, or None if not configured."""
+    import boto3
+    s3_key    = os.getenv("S3_ACCESS_KEY")
+    s3_secret = os.getenv("S3_SECRET_KEY")
+    s3_bucket = os.getenv("S3_BUCKET_RAW")
+    if not (s3_key and s3_secret and s3_bucket):
+        return None, None
+    session = boto3.session.Session()
+    client = session.client(
+        "s3",
+        aws_access_key_id=s3_key,
+        aws_secret_access_key=s3_secret,
+        endpoint_url=os.getenv("S3_ENDPOINT") or None,
+    )
+    return client, s3_bucket
+
+
+def _list_minio_song_ids() -> list[str]:
+    """List numeric song IDs whose .mp3 is present in the configured MinIO bucket."""
+    client, bucket = _minio_client()
+    if client is None:
+        return []
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        song_ids: set[str] = set()
+        for page in paginator.paginate(Bucket=bucket):
+            for obj in page.get("Contents", []):
+                name = obj["Key"].rsplit("/", 1)[-1]
+                if name.endswith(".mp3"):
+                    sid = name[:-4]
+                    if sid.isdigit():
+                        song_ids.add(sid)
+        return sorted(song_ids, key=int)
+    except Exception as exc:
+        logger.warning("MinIO list failed: %s", exc)
+        return []
+
+
+def _download_from_minio(song_id: str) -> Optional[bytes]:
+    """Download audio bytes for song_id from MinIO. Returns None on failure."""
+    client, bucket = _minio_client()
+    if client is None:
+        return None
+    prefix = os.getenv("DATASET_PREFIX", "").strip().strip("/")
+    candidates = [f"songs/{song_id}.mp3", f"{song_id}.mp3"]
+    if prefix:
+        candidates.append(f"{prefix}/songs/{song_id}.mp3")
+    for key in candidates:
+        try:
+            resp = client.get_object(Bucket=bucket, Key=key)
+            return resp["Body"].read()
+        except Exception:
+            continue
+    return None
+
+
+def _dispatch_to_worker(audio_bytes: bytes, filename: str, algorithm: str = "custom", llm_mode: str = "deterministic") -> str:
     """Save audio to disk, create DB task, publish to RabbitMQ. Returns task_id."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     task_id   = str(uuid.uuid4())
@@ -93,6 +150,9 @@ def _dispatch_to_worker(audio_bytes: bytes, filename: str) -> str:
     with open(file_path, "wb") as fh:
         fh.write(audio_bytes)
 
+    routing_key = "segmentation.llm" if algorithm == "llm" else "segmentation.custom"
+    requested_params = {"llm_segmentation": {"mode": llm_mode}} if algorithm == "llm" else None
+
     db = SessionLocal()
     try:
         db.add(SegmentationTask(
@@ -100,9 +160,9 @@ def _dispatch_to_worker(audio_bytes: bytes, filename: str) -> str:
             filename=filename,
             status="processing",
             results={},
-            expected_algorithms=["custom"],
+            expected_algorithms=[algorithm],
             source_type="upload",
-            requested_params=None,
+            requested_params=requested_params,
         ))
         db.commit()
     except Exception:
@@ -114,15 +174,15 @@ def _dispatch_to_worker(audio_bytes: bytes, filename: str) -> str:
     rmq = RabbitMQClient(service_name="batch_eval")
     rmq.publish(
         exchange="segmentation_topic",
-        routing_key="segmentation.custom",
+        routing_key=routing_key,
         message={
             "task_id": task_id,
             "source_type": "upload",
             "original_filename": filename,
             "file_path": file_path,
             "content_type": "audio/mpeg",
-            "algorithms": ["custom"],
-            "params": {},
+            "algorithms": [algorithm],
+            "params": requested_params or {},
         },
     )
     return task_id
@@ -143,6 +203,31 @@ def _wait_for_task(task_id: str, timeout: int = 240, poll_s: float = 3.0) -> Opt
         finally:
             db.close()
         time.sleep(poll_s)
+    return None
+
+
+async def _wait_for_task_async(task_id: str, timeout: int = 240, poll_s: float = 3.0) -> Optional[dict]:
+    """Non-blocking task poller — yields to event loop between polls."""
+    def _query() -> Optional[dict] | str:
+        db = SessionLocal()
+        try:
+            task = db.query(SegmentationTask).filter(
+                SegmentationTask.task_id == task_id
+            ).first()
+            if task and task.status == "completed":
+                return task.results or {}
+            if task and task.status == "failed":
+                return None
+            return "pending"
+        finally:
+            db.close()
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        result = await asyncio.to_thread(_query)
+        if result != "pending":
+            return result  # dict on success, None on failure
+        await asyncio.sleep(poll_s)
     return None
 
 
@@ -181,71 +266,109 @@ def _batch_summary(rows: list[dict], tolerance: float) -> str:
     return "\n".join(lines)
 
 
-def _run_batch_eval_sync(job_id: str, max_tracks: int, tolerance: float) -> None:
-    job = _batch_jobs[job_id]
+def _save_batch_job_result(job_id: str, rows: list[dict], summary: str | None, error: str | None) -> None:
+    ok_rows = [r for r in rows if not r.get("error")]
+    avg_p = sum(r["precision"]  for r in ok_rows) / len(ok_rows) if ok_rows else None
+    avg_r = sum(r["recall"]     for r in ok_rows) / len(ok_rows) if ok_rows else None
+    avg_f = sum(r["f_measure"]  for r in ok_rows) / len(ok_rows) if ok_rows else None
 
-    def log(line: str):
+    db = SessionLocal()
+    try:
+        record = db.query(BatchEvalJob).filter(BatchEvalJob.job_id == job_id).first()
+        if record:
+            record.status       = "failed" if error else "completed"
+            record.completed_at = datetime.now(timezone.utc)
+            record.summary      = summary
+            record.rows         = rows
+            record.error        = error
+            record.tracks_ok    = len(ok_rows)
+            record.tracks_total = len(rows)
+            record.avg_precision = avg_p
+            record.avg_recall    = avg_r
+            record.avg_f1        = avg_f
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to persist BatchEvalJob %s: %s", job_id, exc)
+    finally:
+        db.close()
+
+
+async def _run_batch_eval_async(job_id: str, max_tracks: int, tolerance: float, concurrency: int, algorithm: str = "custom", llm_mode: str = "deterministic") -> None:
+    job = _batch_jobs[job_id]
+    sem = asyncio.Semaphore(concurrency)
+
+    def log(line: str) -> None:
         job["lines"].append(line)
 
+    async def eval_one(sid: str, title: str, idx: int, total: int) -> dict:
+        try:
+            async with sem:
+                ref = await asyncio.to_thread(
+                    lambda: parse_salami_annotation(sid, annotator=1)
+                            or parse_salami_annotation(sid, annotator=2)
+                )
+                if not ref:
+                    log(f"[{idx:>3}/{total}] {sid}  skip: no annotation")
+                    return {"song_id": sid, "title": title, "error": "no_annotation"}
+
+                audio = await asyncio.to_thread(_download_from_minio, sid)
+                if audio is None:
+                    log(f"[{idx:>3}/{total}] {sid}  skip: not found in MinIO")
+                    return {"song_id": sid, "title": title, "error": "minio_not_found"}
+
+                task_id = await asyncio.to_thread(_dispatch_to_worker, audio, f"{sid}.mp3", algorithm, llm_mode)
+
+                results = await _wait_for_task_async(task_id)
+                if not results:
+                    log(f"[{idx:>3}/{total}] {sid}  skip: timeout / worker failed")
+                    return {"song_id": sid, "title": title, "error": "timeout"}
+
+                est = next(iter(results.values()), [])
+                m2  = compute_boundary_metrics(ref, est, tolerance=tolerance)
+                log(
+                    f"[{idx:>3}/{total}] {sid}  "
+                    f"P={m2['precision']:.3f}  R={m2['recall']:.3f}  F1={m2['f_measure']:.3f}"
+                    f"  (est={m2['n_boundaries_est']}/ref={m2['n_boundaries_ref']})"
+                )
+                return {
+                    "song_id":   sid,
+                    "title":     title,
+                    "n_ref":     m2["n_boundaries_ref"],
+                    "n_est":     m2["n_boundaries_est"],
+                    "precision": m2["precision"],
+                    "recall":    m2["recall"],
+                    "f_measure": m2["f_measure"],
+                    "error":     "",
+                }
+        except Exception as exc:
+            import traceback
+            log(f"[{idx:>3}/{total}] {sid}  EXCEPTION: {exc}")
+            logger.error("eval_one %s failed", sid, exc_info=True)
+            return {"song_id": sid, "title": title, "error": str(exc)}
+
     try:
-        meta = _load_salami_metadata()
-        log(f"Metadata: {len(meta)} entries")
+        meta          = await asyncio.to_thread(_load_salami_metadata)
+        minio_ids     = await asyncio.to_thread(_list_minio_song_ids)
+        log(f"MinIO songs : {len(minio_ids)}")
+        if not minio_ids:
+            log("ERROR: No songs found in MinIO. Check S3_BUCKET_RAW / S3_ACCESS_KEY env vars.")
+            return
 
-        all_ids = _list_annotated_song_ids()
-        log(f"Annotated: {len(all_ids)} songs")
+        annotated_ids = set(await asyncio.to_thread(_list_annotated_song_ids))
+        log(f"Annotated   : {len(annotated_ids)} songs")
 
-        candidates = [
-            (sid, meta[sid]) for sid in all_ids
-            if sid in meta and meta[sid].get("url")
-        ]
+        candidates = [sid for sid in minio_ids if sid in annotated_ids]
+        log(f"Overlap     : {len(candidates)} tracks")
         if max_tracks > 0:
             candidates = candidates[:max_tracks]
-        log(f"Evaluating: {len(candidates)} tracks\n")
+        log(f"Evaluating  : {len(candidates)} tracks  (concurrency={concurrency})\n")
 
-        rows: list[dict] = []
-        for i, (sid, m) in enumerate(candidates, 1):
-            title = m["title"]
-            log(f"[{i}/{len(candidates)}] {sid}  {title[:40]}")
-
-            ref = parse_salami_annotation(sid, annotator=1) or parse_salami_annotation(sid, annotator=2)
-            if not ref:
-                log("  skip: no annotation")
-                rows.append({"song_id": sid, "title": title, "error": "no_annotation"})
-                continue
-
-            audio = _download_audio(m["url"])
-            if audio is None:
-                log("  skip: download failed")
-                rows.append({"song_id": sid, "title": title, "error": "download_failed"})
-                continue
-
-            try:
-                task_id = _dispatch_to_worker(audio, f"{sid}.mp3")
-            except Exception as exc:
-                log(f"  skip: dispatch error — {exc}")
-                rows.append({"song_id": sid, "title": title, "error": f"dispatch: {exc}"})
-                continue
-
-            results = _wait_for_task(task_id)
-            if not results:
-                log("  skip: timeout / worker failed")
-                rows.append({"song_id": sid, "title": title, "error": "timeout"})
-                continue
-
-            est = next(iter(results.values()), [])
-            m2 = compute_boundary_metrics(ref, est, tolerance=tolerance)
-            rows.append({
-                "song_id":   sid,
-                "title":     title,
-                "n_ref":     m2["n_boundaries_ref"],
-                "n_est":     m2["n_boundaries_est"],
-                "precision": m2["precision"],
-                "recall":    m2["recall"],
-                "f_measure": m2["f_measure"],
-                "error":     "",
-            })
-            log(f"  P={m2['precision']:.3f}  R={m2['recall']:.3f}  F1={m2['f_measure']:.3f}"
-                f"  (est={m2['n_boundaries_est']}/ref={m2['n_boundaries_ref']})")
+        coros = [
+            eval_one(sid, meta.get(sid, {}).get("title", sid), i, len(candidates))
+            for i, sid in enumerate(candidates, 1)
+        ]
+        rows: list[dict] = list(await asyncio.gather(*coros))
 
         summary = _batch_summary(rows, tolerance)
         job["summary"] = summary
@@ -258,6 +381,13 @@ def _run_batch_eval_sync(job_id: str, max_tracks: int, tolerance: float) -> None
         log(f"FATAL: {exc}\n{traceback.format_exc()}")
     finally:
         job["done"] = True
+        await asyncio.to_thread(
+            _save_batch_job_result,
+            job_id,
+            job.get("rows", []),
+            job.get("summary"),
+            job.get("error"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +399,10 @@ class BatchEvalRequest(BaseModel):
     max_tracks: int  = Field(default=20, ge=0, le=500,
                              description="0 = all available tracks")
     tolerance_seconds: float = Field(default=0.5, gt=0, le=10)
+    concurrency: int = Field(default=3, ge=1, le=10,
+                             description="Parallel tracks (match your worker count)")
+    include_llm: bool = False
+    llm_mode: Literal["deterministic", "ai_generated"] = "deterministic"
 
 
 class EvaluationRunRequest(BaseModel):
@@ -295,13 +429,68 @@ class CompareRequest(BaseModel):
 async def start_batch_eval(req: BatchEvalRequest):
     """Start a background SALAMI batch evaluation job. Returns job_id."""
     job_id = str(uuid.uuid4())
-    _batch_jobs[job_id] = {"lines": [], "done": False, "error": None, "summary": None, "rows": []}
-    threading.Thread(
-        target=_run_batch_eval_sync,
-        args=(job_id, req.max_tracks, req.tolerance_seconds),
-        daemon=True,
-    ).start()
+    _batch_jobs[job_id] = {"lines": [], "done": False, "error": None, "summary": None, "rows": [], "algorithm": "llm" if req.include_llm else "custom", "llm_mode": req.llm_mode}
+
+    def _create_record():
+        db = SessionLocal()
+        try:
+            db.add(BatchEvalJob(
+                job_id=job_id,
+                status="running",
+                max_tracks=req.max_tracks,
+                tolerance_seconds=req.tolerance_seconds,
+                concurrency=req.concurrency,
+                rows=[],
+            ))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    await run_in_threadpool(_create_record)
+    asyncio.create_task(
+        _run_batch_eval_async(job_id, req.max_tracks, req.tolerance_seconds, req.concurrency, "llm" if req.include_llm else "custom", req.llm_mode)
+    )
     return {"job_id": job_id}
+
+
+@router.get("/batch/history")
+async def list_batch_eval_history(limit: int = Query(default=30, ge=1, le=100)):
+    """Return list of past batch evaluation jobs, newest first."""
+    def _get():
+        db = SessionLocal()
+        try:
+            jobs = (
+                db.query(BatchEvalJob)
+                .order_by(BatchEvalJob.started_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "job_id":           j.job_id,
+                    "status":           j.status,
+                    "max_tracks":       j.max_tracks,
+                    "tolerance_seconds": j.tolerance_seconds,
+                    "concurrency":      j.concurrency,
+                    "started_at":       j.started_at.isoformat() if j.started_at else None,
+                    "completed_at":     j.completed_at.isoformat() if j.completed_at else None,
+                    "tracks_ok":        j.tracks_ok,
+                    "tracks_total":     j.tracks_total,
+                    "avg_precision":    j.avg_precision,
+                    "avg_recall":       j.avg_recall,
+                    "avg_f1":           j.avg_f1,
+                    "summary":          j.summary,
+                    "rows":             j.rows or [],
+                    "error":            j.error,
+                }
+                for j in jobs
+            ]
+        finally:
+            db.close()
+    return await run_in_threadpool(_get)
 
 
 @router.get("/batch/{job_id}/stream")
@@ -328,13 +517,32 @@ async def stream_batch_eval(job_id: str):
 
 @router.get("/batch/{job_id}/result")
 async def get_batch_result(job_id: str):
-    """Return the final result of a completed batch eval job."""
+    """Return the final result of a completed batch eval job (memory then DB fallback)."""
     job = _batch_jobs.get(job_id)
-    if not job:
+    if job:
+        if not job["done"]:
+            raise HTTPException(status_code=202, detail="Job still running")
+        return {"job_id": job_id, "summary": job.get("summary"), "rows": job.get("rows", []), "error": job.get("error")}
+
+    def _from_db():
+        db = SessionLocal()
+        try:
+            j = db.query(BatchEvalJob).filter(BatchEvalJob.job_id == job_id).first()
+            return j
+        finally:
+            db.close()
+
+    record = await run_in_threadpool(_from_db)
+    if not record:
         raise HTTPException(status_code=404, detail="Batch job not found")
-    if not job["done"]:
+    if record.status == "running":
         raise HTTPException(status_code=202, detail="Job still running")
-    return {"job_id": job_id, "summary": job.get("summary"), "rows": job.get("rows", []), "error": job.get("error")}
+    return {
+        "job_id":  record.job_id,
+        "summary": record.summary,
+        "rows":    record.rows or [],
+        "error":   record.error,
+    }
 
 
 @router.post("/run")

@@ -48,6 +48,13 @@ SUMMARY_TXT     = "/app/data/eval_summary.txt"
 DOWNLOAD_TIMEOUT_S = 90
 WORKER_CONCURRENCY = 3
 
+# MinIO / S3 config (read from env at runtime)
+_S3_ENDPOINT  = os.getenv("S3_ENDPOINT")
+_S3_KEY       = os.getenv("S3_ACCESS_KEY")
+_S3_SECRET    = os.getenv("S3_SECRET_KEY")
+_S3_BUCKET    = os.getenv("S3_BUCKET_RAW")
+_S3_PREFIX    = os.getenv("DATASET_PREFIX", "").strip().strip("/")
+
 
 # ── Metadata loading ──────────────────────────────────────────────────────────
 
@@ -88,7 +95,63 @@ def list_annotated_song_ids() -> list[str]:
     return sorted(ids, key=int)
 
 
-# ── Audio download ─────────────────────────────────────────────────────────────
+# ── MinIO audio source ────────────────────────────────────────────────────────
+
+def _minio_available() -> bool:
+    return bool(_S3_KEY and _S3_SECRET and _S3_BUCKET)
+
+
+def _minio_client():
+    import boto3
+    session = boto3.session.Session()
+    return session.client(
+        "s3",
+        aws_access_key_id=_S3_KEY,
+        aws_secret_access_key=_S3_SECRET,
+        endpoint_url=_S3_ENDPOINT or None,
+    )
+
+
+def list_minio_song_ids() -> list[str]:
+    """Return numeric song IDs whose .mp3 exists in the configured MinIO bucket."""
+    if not _minio_available():
+        print("[WARNING] MinIO not configured — S3_BUCKET_RAW / S3_ACCESS_KEY missing.", flush=True)
+        return []
+    client = _minio_client()
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        song_ids: set[str] = set()
+        for page in paginator.paginate(Bucket=_S3_BUCKET):
+            for obj in page.get("Contents", []):
+                name = obj["Key"].rsplit("/", 1)[-1]
+                if name.endswith(".mp3"):
+                    sid = name[:-4]
+                    if sid.isdigit():
+                        song_ids.add(sid)
+        return sorted(song_ids, key=int)
+    except Exception as exc:
+        print(f"[ERROR] MinIO list failed: {exc}", flush=True)
+        return []
+
+
+def download_from_minio(song_id: str) -> Optional[bytes]:
+    """Download audio bytes for song_id from MinIO. Returns None if not found."""
+    if not _minio_available():
+        return None
+    client = _minio_client()
+    candidates = [f"songs/{song_id}.mp3", f"{song_id}.mp3"]
+    if _S3_PREFIX:
+        candidates.append(f"{_S3_PREFIX}/songs/{song_id}.mp3")
+    for key in candidates:
+        try:
+            resp = client.get_object(Bucket=_S3_BUCKET, Key=key)
+            return resp["Body"].read()
+        except Exception:
+            continue
+    return None
+
+
+# ── Audio download (kept for fallback / testing) ──────────────────────────────
 
 def download_audio(url: str, timeout: int = DOWNLOAD_TIMEOUT_S) -> Optional[bytes]:
     """Download audio from URL, return raw bytes or None on failure."""
@@ -135,12 +198,11 @@ def load_both_annotations(song_id: str) -> list[list[dict]]:
 
 def evaluate_track(
     song_id: str,
-    url: str,
     title: str,
     tolerance: float,
 ) -> Optional[dict]:
     """
-    Download audio, run segmentation, evaluate against both SALAMI annotators.
+    Fetch audio from MinIO, run segmentation, evaluate against both SALAMI annotators.
     Returns metrics dict or None if track cannot be processed.
     """
     # Load annotations
@@ -148,12 +210,12 @@ def evaluate_track(
     if not annotations:
         return None
 
-    # Download audio
+    # Download audio from MinIO
     t_dl = time.perf_counter()
-    audio_bytes = download_audio(url)
+    audio_bytes = download_from_minio(song_id)
     dl_time = time.perf_counter() - t_dl
     if audio_bytes is None:
-        return {"song_id": song_id, "title": title, "error": "download_failed", "dl_time_s": dl_time}
+        return {"song_id": song_id, "title": title, "error": "minio_not_found", "dl_time_s": dl_time}
 
     # Run segmentation
     t_seg = time.perf_counter()
@@ -346,22 +408,24 @@ def main() -> None:
     print(f"  concurrency: {args.concurrency}", flush=True)
     print(flush=True)
 
-    # Load metadata
+    # Load metadata CSV for titles (optional — used only for display)
     meta = load_metadata()
     print(f"Metadata loaded: {len(meta)} entries", flush=True)
 
-    # Get annotated song IDs
-    song_ids = list_annotated_song_ids()
-    print(f"Annotated songs: {len(song_ids)}", flush=True)
+    # List songs available in MinIO
+    minio_ids = list_minio_song_ids()
+    print(f"MinIO songs    : {len(minio_ids)}", flush=True)
 
-    # Keep only songs that have an audio URL in metadata
-    candidates = []
-    for sid in song_ids:
-        m = meta.get(sid)
-        if m and m.get("url"):
-            candidates.append(sid)
+    if not minio_ids:
+        print("ERROR: No songs found in MinIO. Check S3_BUCKET_RAW / S3_ACCESS_KEY env vars.", flush=True)
+        return
 
-    print(f"Songs with URL : {len(candidates)}", flush=True)
+    # Intersect with annotated song IDs
+    annotated_ids = set(list_annotated_song_ids())
+    print(f"Annotated      : {len(annotated_ids)} songs", flush=True)
+
+    candidates = [sid for sid in minio_ids if sid in annotated_ids]
+    print(f"Overlap        : {len(candidates)} tracks (in MinIO AND annotated)", flush=True)
 
     if args.max_tracks and args.max_tracks > 0:
         candidates = candidates[: args.max_tracks]
@@ -377,8 +441,7 @@ def main() -> None:
             pool.submit(
                 evaluate_track,
                 sid,
-                meta[sid]["url"],
-                meta[sid]["title"],
+                meta.get(sid, {}).get("title", sid),
                 args.tolerance,
             ): sid
             for sid in candidates
@@ -387,6 +450,7 @@ def main() -> None:
         for fut in as_completed(futures):
             sid = futures[fut]
             completed += 1
+            title = meta.get(sid, {}).get("title", sid)
             try:
                 result = fut.result()
                 if result:
@@ -394,10 +458,10 @@ def main() -> None:
                     status = result.get("error") or f"F1={result.get('f_measure', 0):.3f}"
                     print(f"  [{completed:>3}/{len(candidates)}] {sid:>6}  {status}", flush=True)
                 else:
-                    rows.append({"song_id": sid, "title": meta[sid]["title"], "error": "no_annotation"})
+                    rows.append({"song_id": sid, "title": title, "error": "no_annotation"})
                     print(f"  [{completed:>3}/{len(candidates)}] {sid:>6}  skip (no annotation)", flush=True)
             except Exception as exc:
-                rows.append({"song_id": sid, "title": meta[sid]["title"], "error": str(exc)})
+                rows.append({"song_id": sid, "title": title, "error": str(exc)})
                 print(f"  [{completed:>3}/{len(candidates)}] {sid:>6}  ERROR: {exc}", flush=True)
 
     # Generate and print report

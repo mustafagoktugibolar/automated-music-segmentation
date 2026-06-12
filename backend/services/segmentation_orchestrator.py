@@ -32,6 +32,7 @@ class SegmentationOrchestrator:
             "foote": "segmentation.foote",
             "cnmf": "segmentation.cnmf",
             "scluster": "segmentation.scluster",
+            "llm": "segmentation.llm",
             "user_code": "segmentation.user_code",
         }
         self._blob_helper = None
@@ -75,6 +76,11 @@ class SegmentationOrchestrator:
         if "msaf" in payload and not msaf_requested:
             logger.warning("Ignoring msaf params because no MSAF algorithm was requested")
             payload.pop("msaf", None)
+
+        llm_requested = "llm" in algorithms
+        if "llm_segmentation" in payload and not llm_requested:
+            logger.warning("Ignoring llm_segmentation params because llm algorithm was not requested")
+            payload.pop("llm_segmentation", None)
 
         return payload
 

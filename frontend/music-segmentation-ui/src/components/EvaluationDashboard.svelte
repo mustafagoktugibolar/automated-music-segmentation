@@ -28,11 +28,16 @@
 
   // Built-in algorithm names (always available for comparison)
   const BUILTIN_ALGOS = [
-    { id: "custom", name: "custom (built-in)" },
-    { id: "foote", name: "foote (built-in)" },
-    { id: "cnmf", name: "cnmf (built-in)" },
-    { id: "scluster", name: "scluster (built-in)" },
+    { id: "custom",   name: "custom (built-in)",   isLLM: false },
+    { id: "foote",    name: "foote (built-in)",     isLLM: false },
+    { id: "cnmf",     name: "cnmf (built-in)",      isLLM: false },
+    { id: "scluster", name: "scluster (built-in)",  isLLM: false },
+    { id: "llm",      name: "AI Agent (LLM)",        isLLM: true  },
   ];
+
+  // Confirmation modal for LLM in evaluation
+  let showLLMEvalConfirm = false;
+  let llmMode = "deterministic";
 
   let toleranceSeconds = 3;
 
@@ -44,6 +49,8 @@
   let segmentationHistory = [];
   let selectedHistoryItem = null;
   let timelineZoom = 1.25;
+  let comparisonScrollEl = null;
+  let comparisonDragState = null;
   let historyScrollEl = null;
   let historyDragState = null;
 
@@ -144,7 +151,11 @@
         const isBuiltin = BUILTIN_ALGOS.some((a) => a.id === algoId);
 
         if (isBuiltin) {
-          const taskId = await uploadSegmentation({ file: sharedBuiltInAudioFile, algorithms: [algoId] });
+          const taskId = await uploadSegmentation({
+            file: sharedBuiltInAudioFile,
+            algorithms: [algoId],
+            params: algoId === "llm" ? { llm_segmentation: { mode: llmMode } } : null,
+          });
           taskIds[algoId] = taskId;
         } else {
           // User algorithm — dispatch via test endpoint
@@ -315,6 +326,38 @@
     event.preventDefault();
     const direction = event.deltaY > 0 ? -0.12 : 0.12;
     timelineZoom = clampZoom(Number((timelineZoom + direction).toFixed(2)));
+  }
+
+  function handleComparisonWheel(event) {
+    if (!comparisonScrollEl) return;
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      const direction = event.deltaY > 0 ? -0.12 : 0.12;
+      timelineZoom = clampZoom(Number((timelineZoom + direction).toFixed(2)));
+      return;
+    }
+    if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+      comparisonScrollEl.scrollLeft += event.deltaY;
+    }
+  }
+
+  function handleComparisonPointerDown(event) {
+    if (!comparisonScrollEl) return;
+    comparisonDragState = {
+      startX: event.clientX,
+      startScrollLeft: comparisonScrollEl.scrollLeft,
+    };
+    comparisonScrollEl.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleComparisonPointerMove(event) {
+    if (!comparisonScrollEl || !comparisonDragState) return;
+    const deltaX = event.clientX - comparisonDragState.startX;
+    comparisonScrollEl.scrollLeft = comparisonDragState.startScrollLeft - deltaX;
+  }
+
+  function endComparisonDrag() {
+    comparisonDragState = null;
   }
 
   function handleHistoryPointerDown(event) {
@@ -566,7 +609,10 @@
                 checked={selectedAlgoIds.has(a.id)}
                 on:change={() => toggleAlgo(a.id)}
               />
-              {a.name}
+              <span class="flex-1">{a.name}</span>
+              {#if a.isLLM}
+                <span class="rounded-full border border-amber-800/50 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-amber-400">LLM</span>
+              {/if}
             </label>
           {/each}
           {#if algorithms.length > 0}
@@ -584,6 +630,23 @@
             {/each}
           {/if}
         </div>
+
+        {#if selectedAlgoIds.has("llm")}
+          <div class="mt-3 rounded-2xl border border-zinc-800 bg-zinc-950/60 px-3 py-3">
+            <label class="text-[10px] font-medium uppercase tracking-wider text-zinc-500" for="eval-llm-mode">
+              AI Agent mode
+            </label>
+            <select
+              id="eval-llm-mode"
+              bind:value={llmMode}
+              class="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="deterministic">Deterministic</option>
+              <option value="ai_generated">AI generated</option>
+            </select>
+            <p class="mt-2 text-[10px] text-zinc-500">Applies only to the AI Agent algorithm.</p>
+          </div>
+        {/if}
       </div>
 
       <!-- Tolerance slider -->
@@ -608,7 +671,7 @@
       <!-- Run button -->
       <button
         class="w-full rounded-2xl bg-indigo-500 py-2.5 text-sm font-semibold text-white hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed"
-        on:click={runComparison}
+        on:click={() => selectedAlgoIds.has("llm") ? (showLLMEvalConfirm = true) : runComparison()}
         disabled={isRunning || !selectedTrack}
       >
         {#if isRunning}
@@ -626,6 +689,42 @@
       {/if}
     </div>
   </aside>
+
+  <!-- ── LLM eval confirmation modal ── -->
+  {#if showLLMEvalConfirm}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div class="w-full max-w-sm rounded-3xl border border-amber-800/50 bg-zinc-950 p-6 shadow-2xl shadow-black/40">
+        <div class="flex items-start gap-3">
+          <div class="shrink-0 rounded-xl border border-amber-800/40 bg-amber-500/10 p-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-zinc-100">AI Agent selected</h3>
+            <p class="mt-1.5 text-xs text-zinc-400 leading-relaxed">
+              <strong class="text-zinc-200">AI Agent (LLM)</strong> has been included in the comparison.
+              An <strong class="text-amber-300">LLM API call</strong> will be made for this track.
+            </p>
+          </div>
+        </div>
+        <div class="mt-5 flex gap-2">
+          <button
+            class="flex-1 rounded-2xl border border-zinc-800 bg-zinc-900 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
+            on:click={() => (showLLMEvalConfirm = false)}
+          >
+            Cancel
+          </button>
+          <button
+            class="flex-1 rounded-2xl bg-indigo-500 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
+            on:click={() => { showLLMEvalConfirm = false; runComparison(); }}
+          >
+            Yes, continue
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Batch Eval sliding panel -->
   {#if batchOpen}
@@ -914,56 +1013,98 @@
 
           <!-- Segmentation map -->
           <div class="px-5 py-4 space-y-3">
-            <div class="flex items-center justify-between">
-              <p class="text-xs font-medium text-zinc-400">Segmentation Map</p>
-              <p class="text-[10px] text-zinc-500">time axis, segments shown as bars</p>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs font-medium text-zinc-400">Segmentation Map</p>
+                <p class="text-[10px] text-zinc-500">drag to pan, Ctrl/⌘ + wheel to zoom</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="h-7 w-7 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                  on:click={zoomOut}
+                  disabled={timelineZoom <= TIMELINE_MIN_ZOOM}
+                  title="Zoom out"
+                >−</button>
+                <input
+                  class="w-28 accent-indigo-500"
+                  type="range"
+                  min={TIMELINE_MIN_ZOOM}
+                  max={TIMELINE_MAX_ZOOM}
+                  step="0.05"
+                  value={timelineZoom}
+                  on:input={(e) => setTimelineZoom(e.currentTarget.value)}
+                  title="Timeline zoom"
+                />
+                <button
+                  type="button"
+                  class="h-7 w-7 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                  on:click={zoomIn}
+                  disabled={timelineZoom >= TIMELINE_MAX_ZOOM}
+                  title="Zoom in"
+                >+</button>
+                <button
+                  type="button"
+                  class="h-7 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                  on:click={resetZoom}
+                >{timelineZoom.toFixed(2)}x</button>
+              </div>
             </div>
 
-            <div class="overflow-x-auto">
+            <div
+              class={"overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950/80 " + (comparisonDragState ? "cursor-grabbing" : "cursor-grab")}
+              bind:this={comparisonScrollEl}
+              on:wheel={handleComparisonWheel}
+              on:pointerdown={handleComparisonPointerDown}
+              on:pointermove={handleComparisonPointerMove}
+              on:pointerup={endComparisonDrag}
+              on:pointercancel={endComparisonDrag}
+              on:pointerleave={endComparisonDrag}
+            >
               <svg
-                viewBox={`0 0 ${TIMELINE_LEFT_COL + TIMELINE_WIDTH} ${Math.max(160, (Object.keys(comparisonResults).length + 1) * TIMELINE_ROW_H + 28)}`}
-                class="w-full rounded-2xl border border-zinc-800 bg-zinc-950/80"
-                style="min-width: 860px"
+                viewBox={`0 0 ${TIMELINE_LEFT_COL + timelineWidth()} ${Math.max(180, (Object.keys(comparisonResults).length + 1) * TIMELINE_ROW_H + 42)}`}
+                class="block"
+                style={`width: ${TIMELINE_LEFT_COL + timelineWidth()}px; min-width: 100%; height: ${Math.max(180, (Object.keys(comparisonResults).length + 1) * TIMELINE_ROW_H + 42)}px`}
               >
                 {#each timelineTicks() as tick}
-                  <line x1={TIMELINE_LEFT_COL + tick.x} y1="18" x2={TIMELINE_LEFT_COL + tick.x} y2="100%" stroke="#27272a" stroke-width="1" stroke-dasharray="3 4" />
-                  <text x={TIMELINE_LEFT_COL + tick.x} y="14" text-anchor="middle" fill="#71717a" font-size="10">{tick.label}</text>
+                  <line x1={TIMELINE_LEFT_COL + tick.x} y1="22" x2={TIMELINE_LEFT_COL + tick.x} y2="100%" stroke="#27272a" stroke-width="1" stroke-dasharray="3 4" />
+                  <text x={TIMELINE_LEFT_COL + tick.x} y="16" text-anchor="middle" fill="#71717a" font-size="10">{tick.label}</text>
                 {/each}
 
                 <!-- Ground truth row -->
-                <text x="16" y={46} fill="#a1a1aa" font-size="11">Ground Truth</text>
-                <rect x={TIMELINE_LEFT_COL} y={24} width={TIMELINE_WIDTH} height="18" rx="9" fill="#18181b" stroke="#27272a" />
+                <text x="16" y={49} fill="#a1a1aa" font-size="11" font-weight="600">Ground Truth</text>
+                <rect x={TIMELINE_LEFT_COL} y={26} width={timelineWidth()} height="20" rx="7" fill="#18181b" stroke="#27272a" />
                 {#each segmentRects(selectedTrack.ground_truth || []) as seg}
                   <rect
                     x={TIMELINE_LEFT_COL + seg.x}
-                    y="25"
+                    y="27"
                     width={seg.width}
-                    height="16"
-                    rx="7"
+                    height="18"
+                    rx="6"
                     fill="#4f46e5"
                     opacity="0.9"
                   />
-                  {#if seg.width > 42}
-                    <text x={TIMELINE_LEFT_COL + seg.x + 6} y="37" fill="#f8fafc" font-size="10" font-weight="600">{seg.label}</text>
+                  {#if seg.width > 34}
+                    <text x={TIMELINE_LEFT_COL + seg.x + 6} y="40" fill="#f8fafc" font-size="10" font-weight="600">{seg.label}</text>
                   {/if}
                 {/each}
 
                 {#each Object.entries(comparisonResults) as [name, result], i}
                   {#if !result.error}
-                    <text x="16" y={46 + (i + 1) * TIMELINE_ROW_H} fill="#a1a1aa" font-size="11">{name}</text>
-                    <rect x={TIMELINE_LEFT_COL} y={24 + (i + 1) * TIMELINE_ROW_H} width={TIMELINE_WIDTH} height="18" rx="9" fill="#18181b" stroke="#27272a" />
+                    <text x="16" y={49 + (i + 1) * TIMELINE_ROW_H} fill="#a1a1aa" font-size="11" font-weight="600">{name}</text>
+                    <rect x={TIMELINE_LEFT_COL} y={26 + (i + 1) * TIMELINE_ROW_H} width={timelineWidth()} height="20" rx="7" fill="#18181b" stroke="#27272a" />
                     {#each segmentRects(result.segments || []) as seg}
                       <rect
                         x={TIMELINE_LEFT_COL + seg.x}
-                        y={25 + (i + 1) * TIMELINE_ROW_H}
+                        y={27 + (i + 1) * TIMELINE_ROW_H}
                         width={seg.width}
-                        height="16"
-                        rx="7"
+                        height="18"
+                        rx="6"
                         fill={ROW_COLORS[i % ROW_COLORS.length]}
                         opacity="0.88"
                       />
-                      {#if seg.width > 42}
-                        <text x={TIMELINE_LEFT_COL + seg.x + 6} y={37 + (i + 1) * TIMELINE_ROW_H} fill="#fafafa" font-size="10" font-weight="600">{seg.label}</text>
+                      {#if seg.width > 34}
+                        <text x={TIMELINE_LEFT_COL + seg.x + 6} y={40 + (i + 1) * TIMELINE_ROW_H} fill="#fafafa" font-size="10" font-weight="600">{seg.label}</text>
                       {/if}
                     {/each}
                   {/if}

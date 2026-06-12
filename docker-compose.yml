@@ -70,8 +70,7 @@ services:
         condition: service_healthy
       music_segmentation_rabbitmq:
         condition: service_healthy
-  worker-custom-1:
-    container_name: worker-custom-1
+  worker-custom:
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -84,9 +83,10 @@ services:
     env_file:
       - ./.env
     environment:
-      SERVICE_NAME: worker-custom-1
+      SERVICE_NAME: worker-custom
       WORKER_TYPE: custom_segmentation
       MESSAGE_CODE: segmentation.custom
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
     depends_on:
       - music_segmentation_rabbitmq
   worker-msaf-foote:
@@ -188,6 +188,28 @@ services:
     depends_on:
       - music_segmentation_rabbitmq
     command: ["python", "workers/run_dataset.py"]
+  worker-llm-1:
+    container_name: worker-llm-1
+    image: music-segmentation-worker:latest
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - ./workers:/app/workers
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+      - media_data:/app/media
+      - ./data:/app/data
+    env_file:
+      - ./.env
+    environment:
+      SERVICE_NAME: worker-llm-1
+      WORKER_TYPE: llm_segmentation
+      MESSAGE_CODE: segmentation.llm
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
+    depends_on:
+      - music_segmentation_rabbitmq
   minio:
     container_name: minio
     image: minio/minio:latest
