@@ -20,27 +20,28 @@ sequenceDiagram
     Api->>DB: Via dataset endpoints
     DB-->>EvalUI: Track metadata and ground_truth
 
-    loop Each selected algorithm
-        EvalUI->>Api: getSongStreamUrl(song_id)
-        Api->>Songs: GET /songs/stream/{song_id}
-        Songs-->>EvalUI: Audio blob stream
-        EvalUI->>Api: uploadSegmentation(File, [algo], params)
-        Api->>SegApi: POST /segmentation/upload
-        SegApi->>DB: Create SegmentationTask
-        SegApi->>MQ: Publish segmentation.<algo>
-        MQ-->>Workers: Deliver task
-        Workers->>Workers: Run analysis
-        Workers->>MQ: Publish segmentation.result
-        MQ-->>Listener: Deliver result
-        Listener->>DB: Store task results and status
-        Listener-->>EvalUI: SSE completion update
+    EvalUI->>Api: getSongStreamUrl(song_id)
+    Api->>Songs: GET /songs/stream/{song_id}
+    Songs-->>EvalUI: Audio blob stream
+    EvalUI->>Api: uploadSegmentation(File, algorithms, params)
+    Api->>SegApi: POST /segmentation/upload
+    SegApi->>DB: Create SegmentationTask
+    SegApi->>MQ: Publish segmentation tasks for requested algorithms
+    MQ-->>Workers: Deliver task(s)
+    Workers->>Workers: Run analysis
+    Workers->>MQ: Publish segmentation.result
+    MQ-->>Listener: Deliver result
+    Listener->>DB: Store normalized results and status
+    opt fusion requested
+        Listener->>MQ: Publish segmentation.fusion after base outputs resolve
     end
+    Listener-->>EvalUI: SSE partial/completion updates
 
-    EvalUI->>EvalUI: Wait for all task_ids to complete via SSE
+    EvalUI->>EvalUI: Wait for unified task_id to complete via SSE
     EvalUI->>Api: compareAlgorithms(trackId, taskIds, tolerance)
     Api->>EvalApi: POST /evaluation/compare
     EvalApi->>DB: Load DatasetTrack.ground_truth
-    loop Each completed task
+    loop Each requested algorithm in task_ids
         EvalApi->>DB: Load SegmentationTask.results
         EvalApi->>EvalSvc: compute_boundary_metrics(ref_segments, est_segments, tolerance)
         EvalSvc-->>EvalApi: precision, recall, f_measure, segment_iou, counts

@@ -9,9 +9,8 @@ sequenceDiagram
     participant Librosa as librosa/scipy/sklearn
 
     CustomW->>Service: process_file_path(file_path, params)
-    Service->>Service: Read audio bytes
-    Service->>Service: _analyze_content(content, filename, params)
-    Service->>Librosa: Load audio from bytes<br/>22050 Hz mono
+    Service->>Service: _analyze_content(None, filename, params, _file_path)
+    Service->>Librosa: Load audio from file path<br/>ffmpeg preferred, else librosa
     Librosa-->>Service: y, sr
     Service->>Service: Detect active region from RMS
     alt no active music
@@ -40,13 +39,14 @@ sequenceDiagram
         Service->>Fusion: beat_phrase_boundary_candidates()
         Fusion-->>Service: Beat-grid candidates
         Service->>Service: Compute dynamic feature weights
-        Service->>Fusion: fuse_boundary_candidates(all_candidates, weights)
+        Service->>Fusion: fuse_feature_candidates(all_candidates, dynamic_weights)
         Fusion-->>Service: fused boundaries
         Service->>Fusion: snap_fused_boundaries(onsets, beats)
         Fusion-->>Service: snapped boundaries
         Service->>Service: _cluster_and_label_segments()
         Service->>Service: SSM labels, KMeans fallback, min-duration merge
-        Service->>Service: Assign section_type and shift active-region offset
-        Service-->>CustomW: {filename, duration_seconds, estimated_bpm, candidate_boundaries, segments, status}
+        Service->>Service: Assign structural + semantic labels
+        Service->>Service: Shift active-region offset back to full-track timeline
+        Service-->>CustomW: {filename, duration_seconds, estimated_bpm, candidate_boundaries, segments, diagnostics?}
     end
 ```

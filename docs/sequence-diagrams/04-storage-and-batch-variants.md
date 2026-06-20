@@ -14,6 +14,7 @@ sequenceDiagram
     participant Blob as Azure/MinIO/S3 cache
     participant MQ as RabbitMQ
     participant Workers as Segmentation workers
+    participant Listener as ResultListener
     participant DB as PostgreSQL
 
     alt Segment one stored SALAMI song
@@ -41,7 +42,7 @@ sequenceDiagram
         end
     else Batch evaluation
         User->>BatchUI: Start batch eval
-        BatchUI->>Api: startBatchEval(maxTracks, tolerance, concurrency)
+        BatchUI->>Api: startBatchEval(maxTracks, tolerances, algorithms, concurrency)
         Api->>EvalApi: POST /evaluation/batch
         EvalApi->>DB: Create BatchEvalJob(status=running)
         EvalApi-->>BatchUI: job_id
@@ -49,12 +50,17 @@ sequenceDiagram
         EvalApi->>EvalApi: Background job lists MinIO songs and annotations
         loop Each candidate track
             EvalApi->>Blob: Download audio bytes
-            EvalApi->>DB: Create SegmentationTask
-            EvalApi->>MQ: Publish segmentation.custom or segmentation.llm
-            MQ-->>Workers: Run analysis and publish result
+            EvalApi->>Orch: Dispatch one segmentation task<br/>with requested algorithms
+            Orch->>DB: Create SegmentationTask
+            Orch->>MQ: Publish algorithm tasks
+            MQ-->>Workers: Run analysis and publish result(s)
             Workers->>MQ: segmentation.result
-            EvalApi->>DB: Poll task until completed
-            EvalApi->>EvalApi: compute_boundary_metrics()
+            MQ-->>Listener: Store normalized results
+            opt fusion requested
+                Listener->>MQ: Publish segmentation.fusion after base outputs resolve
+            end
+            EvalApi->>EvalApi: Wait for task results
+            EvalApi->>EvalApi: compute_boundary_metrics_multi()
             EvalApi-->>BatchUI: SSE log line
         end
         EvalApi->>DB: Persist BatchEvalJob summary and rows

@@ -11,7 +11,7 @@ sequenceDiagram
     participant DB as PostgreSQL<br/>SegmentationTask
     participant MQ as RabbitMQ<br/>segmentation_topic
     participant W as Worker<br/>BaseWorker
-    participant Analyzer as Analysis engine<br/>custom/MSAF/LLM
+    participant Analyzer as Analysis engine<br/>custom/MSAF/fusion/LLM
     participant Listener as ResultListener
     participant SSE as SSE stream<br/>/segmentation/stream/{task_id}
 
@@ -25,7 +25,7 @@ sequenceDiagram
     Orch->>Orch: Normalize algorithms and trim params
     Orch->>Orch: Generate task_id and save upload to media/uploads
     Orch->>DB: INSERT SegmentationTask<br/>status=processing, expected_algorithms, results={}
-    Orch->>MQ: Publish one message per algorithm<br/>routing_key=segmentation.custom/foote/cnmf/scluster/llm
+    Orch->>MQ: Publish one message per dispatch algorithm<br/>routing_key=segmentation.custom/foote/cnmf/scluster/fusion/llm
     Orch-->>SegApi: task_id
     SegApi-->>Api: 200 {task_id, status: processing}
     Api-->>UI: task_id
@@ -44,19 +44,26 @@ sequenceDiagram
         else MSAF
             W->>Analyzer: MSAFWorker.process_task()
             Analyzer->>Analyzer: msaf.process(file_path, boundaries_id)
+        else fusion
+            W->>Analyzer: FusionWorker.process_task()
+            Analyzer->>Analyzer: fuse_algorithm_results()
         else LLM
             W->>Analyzer: LLMSegmentationWorker.process_task()
             Analyzer->>Analyzer: SegmentationService.segment_audio_dict()
             Analyzer->>Analyzer: SegmentationAgent.run()
         end
-        Analyzer-->>W: {task_id, worker_type, algorithm, segments, metadata}
+        Analyzer-->>W: {task_id, worker_type, algorithm, boundaries, segments, diagnostics}
         W->>MQ: Publish result<br/>routing_key=segmentation.result
         W->>MQ: Ack original task message
         MQ-->>Listener: Deliver segmentation.result
-        Listener->>Listener: Compute result key<br/>custom or algorithm name
+        Listener->>Listener: Normalize result payload and canonical algorithm name
         Listener->>DB: Load SegmentationTask
-        Listener->>DB: Update results[key] = segments
+        Listener->>DB: Update results[key] = segments<br/>and store __result/__boundaries/__diagnostics
         Listener->>Listener: Add optional metadata keys<br/>__explanation, __evaluation, __processing_time
+        opt fusion requested
+            Listener->>Listener: Wait for base outputs or early-dispatch timeout
+            Listener->>MQ: Publish segmentation.fusion with collected base results
+        end
         Listener->>Listener: Compare received keys with expected_algorithms
         alt all expected results received
             Listener->>DB: status = completed
