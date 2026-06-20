@@ -4,14 +4,11 @@
     listDatasets,
     listDatasetTracks,
     getDatasetTrack,
-    listAlgorithms,
-    runEvaluation,
     compareAlgorithms,
     getEvaluationsForTrack,
     getSegmentationsForTrack,
     subscribeToTask,
     uploadSegmentation,
-    testAlgorithm,
     getSongStreamUrl,
     startBatchEval,
     subscribeToBatchEval,
@@ -23,15 +20,15 @@
   let tracks = [];
   let selectedTrack = null;
 
-  let algorithms = [];
   let selectedAlgoIds = new Set();
 
   // Built-in algorithm names (always available for comparison)
   const BUILTIN_ALGOS = [
-    { id: "custom",   name: "custom (built-in)",   isLLM: false },
+    { id: "custom_librosa", name: "custom_librosa (built-in)", isLLM: false },
     { id: "foote",    name: "foote (built-in)",     isLLM: false },
     { id: "cnmf",     name: "cnmf (built-in)",      isLLM: false },
     { id: "scluster", name: "scluster (built-in)",  isLLM: false },
+    { id: "fusion",   name: "fusion (algorithm voting)", isLLM: false },
     { id: "llm",      name: "AI Agent (LLM)",        isLLM: true  },
   ];
 
@@ -62,16 +59,12 @@
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   onMount(async () => {
-    await Promise.all([loadDatasets(), loadAlgorithms()]);
+    await loadDatasets();
   });
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   async function loadDatasets() {
     try { datasets = await listDatasets(); } catch (e) { console.error(e); }
-  }
-
-  async function loadAlgorithms() {
-    try { algorithms = await listAlgorithms(); } catch (e) { console.error(e); }
   }
 
   async function selectDataset(id) {
@@ -121,68 +114,50 @@
     comparisonResults = null;
 
     try {
-      const taskIds = {};
-      let sharedBuiltInAudioFile = null;
+      if (!selectedTrack.audio_url && !selectedTrack.song_id) {
+        runError = "Track has no audio source for built-in algorithms.";
+        isRunning = false;
+        return;
+      }
 
-      const hasBuiltIn = Array.from(selectedAlgoIds).some((algoId) =>
-        BUILTIN_ALGOS.some((algo) => algo.id === algoId)
+      const sourceUrl = selectedTrack.song_id ? getSongStreamUrl(selectedTrack.song_id) : selectedTrack.audio_url;
+      const resp = await fetch(sourceUrl);
+      if (!resp.ok) throw new Error(`Failed to fetch audio: ${resp.status} ${resp.statusText}`);
+      const blob = await resp.blob();
+      const sharedBuiltInAudioFile = new File(
+        [blob],
+        `${selectedTrack.song_id || selectedTrack.track_id || "track"}.mp3`,
+        { type: resp.headers.get("content-type") || "audio/mpeg" },
       );
 
-      if (hasBuiltIn) {
-        if (!selectedTrack.audio_url && !selectedTrack.song_id) {
-          runError = "Track has no audio source for built-in algorithms.";
-          isRunning = false;
-          return;
-        }
+      // Submit a single unified task for all selected algorithms.
+      // This avoids uploading the same audio N times and prevents duplicate
+      // queue messages (fusion would otherwise re-dispatch all base algorithms).
+      const allAlgos = Array.from(selectedAlgoIds);
+      const params = allAlgos.includes("llm") ? { llm_segmentation: { mode: llmMode } } : null;
+      const unifiedTaskId = await uploadSegmentation({
+        file: sharedBuiltInAudioFile,
+        algorithms: allAlgos,
+        params,
+      });
 
-        const sourceUrl = selectedTrack.song_id ? getSongStreamUrl(selectedTrack.song_id) : selectedTrack.audio_url;
-        const resp = await fetch(sourceUrl);
-        if (!resp.ok) throw new Error(`Failed to fetch audio: ${resp.status} ${resp.statusText}`);
-        const blob = await resp.blob();
-        sharedBuiltInAudioFile = new File(
-          [blob],
-          `${selectedTrack.song_id || selectedTrack.track_id || "track"}.mp3`,
-          { type: resp.headers.get("content-type") || "audio/mpeg" },
-        );
-      }
-
-      // Dispatch tasks for each algorithm
-      for (const algoId of selectedAlgoIds) {
-        const isBuiltin = BUILTIN_ALGOS.some((a) => a.id === algoId);
-
-        if (isBuiltin) {
-          const taskId = await uploadSegmentation({
-            file: sharedBuiltInAudioFile,
-            algorithms: [algoId],
-            params: algoId === "llm" ? { llm_segmentation: { mode: llmMode } } : null,
-          });
-          taskIds[algoId] = taskId;
-        } else {
-          // User algorithm — dispatch via test endpoint
-          const res = await testAlgorithm(algoId, {
-            audioSource: { type: "track_id", value: selectedTrack.track_id },
-            params: {},
-          });
-          taskIds[algoId] = res.task_id;
-        }
-      }
-
-      // Wait for all tasks to complete via SSE
+      // All algorithms share the same task — the backend stores each
+      // algorithm's result under its own key in task.results.
       /** @type {Record<string, string>} */
       const completedTasks = {};
-      await Promise.all(
-        Object.entries(taskIds).map(([algoId, taskId]) =>
-          new Promise((resolve) => {
-            const unsub = subscribeToTask(taskId, (data) => {
-              if (data.status === "completed" || data.status === "failed") {
-                completedTasks[algoId] = taskId;
-                unsub();
-                resolve();
-              }
-            });
-          })
-        )
-      );
+      for (const algoId of selectedAlgoIds) {
+        completedTasks[algoId] = unifiedTaskId;
+      }
+
+      // Wait for the unified task to reach a terminal state via SSE.
+      await new Promise((resolve) => {
+        const unsub = subscribeToTask(unifiedTaskId, (data) => {
+          if (data.status === "completed" || data.status === "failed") {
+            unsub();
+            resolve();
+          }
+        });
+      });
 
       // Run evaluation comparison
       const res = await compareAlgorithms({
@@ -618,20 +593,6 @@
               {/if}
             </label>
           {/each}
-          {#if algorithms.length > 0}
-            <p class="text-xs text-zinc-500 pt-1 pl-2">User algorithms:</p>
-            {#each algorithms as a}
-              <label class="flex items-center gap-2 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-zinc-800 text-sm text-zinc-300">
-                <input
-                  type="checkbox"
-                  class="accent-indigo-500"
-                  checked={selectedAlgoIds.has(a.algorithm_id)}
-                  on:change={() => toggleAlgo(a.algorithm_id)}
-                />
-                {a.name} v{a.version}
-              </label>
-            {/each}
-          {/if}
         </div>
 
         {#if selectedAlgoIds.has("llm")}
@@ -741,7 +702,7 @@
         <div class="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
           <div>
             <h2 class="text-base font-semibold text-zinc-100">Batch Evaluation</h2>
-            <p class="text-xs text-zinc-500 mt-0.5">Run custom algorithm on multiple SALAMI tracks</p>
+            <p class="text-xs text-zinc-500 mt-0.5">Run selected algorithms on multiple SALAMI tracks</p>
           </div>
           <button on:click={closeBatchPanel} class="text-zinc-500 hover:text-zinc-200 text-xl leading-none">✕</button>
         </div>

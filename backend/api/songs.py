@@ -23,7 +23,7 @@ orchestrator = SegmentationOrchestrator()
 
 class SegmentBatchRequest(BaseModel):
     song_ids: List[str]
-    algorithms: Optional[List[str]] = ["custom", "foote", "cnmf", "scluster"]
+    algorithms: Optional[List[str]] = ["custom_librosa", "foote", "cnmf", "scluster"]
 
 
 @router.get("")

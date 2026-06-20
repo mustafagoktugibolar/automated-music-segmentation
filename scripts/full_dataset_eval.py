@@ -2,7 +2,7 @@
 """
 Full-Dataset Segmentation Evaluation with Run Logging
 =====================================================
-Evaluates the custom segmentation algorithm over every SALAMI track that is
+Evaluates the custom_librosa segmentation algorithm over every SALAMI track that is
 available locally (platform uploads + download cache) — no network needed —
 and persists the results of each run so successive runs are comparable.
 
@@ -18,7 +18,7 @@ Plus one appended line in /app/data/eval_runs/history.csv with the macro
 metrics, so the whole tuning history stays in one greppable file.
 
 Run from the host via scripts/run_full_eval.sh, or directly:
-    docker exec -e PYTHONPATH=/app worker-user-code \
+    docker exec -e PYTHONPATH=/app worker-dataset \
         python /app/scripts/full_dataset_eval.py --label my-experiment
     ... --params '{"novelty_prominence": 0.10}' --max-tracks 50
 """

@@ -289,7 +289,7 @@ def normalise_feature_weights(params_weights: dict | None, spectral_flux_weight:
     return {k: v / total for k, v in weights.items()}
 
 
-def fuse_boundary_candidates(
+def fuse_feature_candidates(
     candidates: list[dict],
     weights: dict[str, float],
     total_dur: float,
@@ -350,6 +350,11 @@ def fuse_boundary_candidates(
         strongest = sorted(kept, key=lambda c: c["confidence"], reverse=True)[:max_boundaries]
         kept = sorted(strongest, key=lambda c: c["time"])
     return kept
+
+
+def fuse_boundary_candidates(*args, **kwargs):
+    """Backward-compatible alias for feature-level candidate fusion."""
+    return fuse_feature_candidates(*args, **kwargs)
 
 
 def _choose_boundary_anchor(best_by_source: dict[str, dict], weights: dict[str, float]) -> dict:

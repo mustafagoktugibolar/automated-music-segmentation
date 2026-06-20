@@ -2,13 +2,13 @@
 """
 SALAMI Batch Evaluation Script
 ================================
-Evaluates the custom segmentation algorithm against the full (or a subset of)
+Evaluates the custom_librosa segmentation algorithm against the full (or a subset of)
 SALAMI dataset and prints an actionable report.
 
-Run inside worker-user-code container:
-    docker exec worker-user-code python /app/workers/../scripts/batch_eval.py
-    docker exec worker-user-code python /app/workers/../scripts/batch_eval.py --max-tracks 50
-    docker exec worker-user-code python /app/workers/../scripts/batch_eval.py --max-tracks 0  # all tracks
+Run inside worker-dataset container:
+    docker exec worker-dataset python /app/workers/../scripts/batch_eval.py
+    docker exec worker-dataset python /app/workers/../scripts/batch_eval.py --max-tracks 50
+    docker exec worker-dataset python /app/workers/../scripts/batch_eval.py --max-tracks 0  # all tracks
 
 Output:
     /app/data/eval_results.csv     -- per-track metrics
@@ -222,7 +222,7 @@ def generate_report(rows: list[dict], tolerance: float) -> str:
 
     lines = []
     lines.append("=" * 60)
-    lines.append("  SALAMI Batch Evaluation — custom algorithm")
+    lines.append("  SALAMI Batch Evaluation — custom_librosa algorithm")
     lines.append("=" * 60)
     lines.append(f"  Tracks attempted : {len(rows)}")
     lines.append(f"  Tracks evaluated : {len(ok)}")
@@ -345,7 +345,7 @@ def save_csv(rows: list[dict], path: str) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SALAMI batch evaluation for custom algorithm")
+    parser = argparse.ArgumentParser(description="SALAMI batch evaluation for custom_librosa algorithm")
     parser.add_argument("--max-tracks", type=int, default=20,
                         help="Max tracks to evaluate (0 = all, default 20)")
     parser.add_argument("--tolerance",  type=float, default=0.5,

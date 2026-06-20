@@ -7,9 +7,9 @@ Pipeline:
   → Shared feature grid: Chroma-CENS + MFCC, median-pooled to target FPS
   → Candidate extraction from RMS, onset/flux, tempo/beat, chord-change proxy,
     optional timed lyrics, and Chroma/MFCC self-similarity novelty
-  → Weighted candidate filtering and fusion
+  → Weighted candidate filtering and feature-level fusion
   → Boundary snapping to strong onsets or beat positions
-  → Segment clustering and section type assignment
+  → Structural clustering and conservative semantic labeling
   → Active-region offset correction back to the full-track timeline
 
 The pipeline is intentionally deterministic. LLM-assisted decisions can be added
@@ -20,6 +20,9 @@ timestamps.
 from __future__ import annotations
 
 import io
+import os
+import shutil
+import subprocess
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -29,13 +32,14 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from sklearn.cluster import KMeans
 
+from shared.labeling import assign_semantic_labels
 from shared.logger import get_logger
 from workers.segmenters.multi_feature_fusion import (
     beat_phrase_boundary_candidates,
     candidates_from_boundaries,
     chord_proxy_boundary_candidates,
     find_boundaries,
-    fuse_boundary_candidates,
+    fuse_feature_candidates,
     lyrics_boundary_candidates,
     normalise_feature_weights,
     onset_boundary_candidates,
@@ -91,6 +95,43 @@ _ONSET_SNAP_WINDOW: float = 0.25  # seconds
 # ---------------------------------------------------------------------------
 # Stage 0 — Audio loading
 # ---------------------------------------------------------------------------
+
+def _find_ffmpeg() -> str | None:
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for candidate in [
+        "/opt/conda/envs/music-segmentation-worker-env/bin/ffmpeg",
+        "/opt/conda/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+_FFMPEG_BIN: str | None = _find_ffmpeg()
+
+
+def _load_audio_ffmpeg(file_path: str, sr: int = _SR) -> tuple[np.ndarray, int]:
+    """Decode audio with ffmpeg subprocess — bypasses audioread's Python chunking.
+
+    audioread reads MP3 frame-by-frame through Python, which adds ~8-12s of
+    overhead for long tracks. ffmpeg decodes + resamples entirely in C and
+    writes raw float32 PCM to stdout; np.frombuffer then wraps it zero-copy.
+    Expected time for a 320s MP3: ~0.3-0.5s.
+    """
+    cmd = [
+        _FFMPEG_BIN, "-nostdin", "-i", file_path,
+        "-f", "f32le", "-ar", str(sr), "-ac", "1",
+        "-loglevel", "error", "pipe:1",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, timeout=180)
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {proc.stderr.decode(errors='replace')}")
+    y = np.frombuffer(proc.stdout, dtype=np.float32).copy()
+    return y, sr
+
 
 def _load_audio_from_bytes(content: bytes, sr: int = _SR) -> tuple[np.ndarray, int]:
     """Load audio from in-memory bytes, resample to sr, return mono float32."""
@@ -646,30 +687,11 @@ def _enforce_min_segment_duration(
 
 
 def _assign_section_types(segments: list[dict], total_dur: float) -> list[dict]:
-    """
-    Heuristic type assignment:
-      · Longest label → Chorus, second → Verse, third → Bridge, rest → Other
-      · First segment (≥4 total) → Intro, last → Outro
-    """
-    if not segments:
-        return segments
-    dur_by_label: dict[str, float] = {}
-    for s in segments:
-        dur_by_label[s["label"]] = dur_by_label.get(s["label"], 0.0) + (s["end"] - s["start"])
-    sorted_labels = [lbl for lbl, _ in sorted(dur_by_label.items(), key=lambda x: -x[1])]
-    type_map = {lbl: ("Chorus" if i == 0 else "Verse" if i == 1 else "Bridge" if i == 2 else "Other")
-                for i, lbl in enumerate(sorted_labels)}
-    n = len(segments)
-    out: list[dict] = []
-    for i, seg in enumerate(segments):
-        stype = type_map.get(seg["label"], "Other")
-        if n >= 4:
-            if i == 0:
-                stype = "Intro"
-            elif i == n - 1:
-                stype = "Outro"
-        out.append({**seg, "section_type": stype})
-    return out
+    """Backward-compatible semantic layer without longest-section naming."""
+    for seg in segments:
+        seg["structural_label"] = seg.get("structural_label") or seg.get("label", "A")
+        seg["label"] = seg["structural_label"]
+    return assign_semantic_labels(segments, duration_seconds=total_dur, enabled=True)
 
 
 def _cluster_and_label_segments(
@@ -685,13 +707,25 @@ def _cluster_and_label_segments(
     energy_curve: np.ndarray | None = None,
     boundary_metadata: list[dict] | None = None,
     ssm_thresh: np.ndarray | None = None,
+    semantic_labeling_enabled: bool = True,
 ) -> list[dict]:
     """
     Build segments from boundary times, label by SSM repetition similarity
     (KMeans on feature descriptors as fallback), assign letter labels
     (A, B, C …), then assign section types.
     """
-    fallback = [{"start": 0.0, "end": round(total_dur, 2), "label": "A", "section_type": "FullTrack"}]
+    fallback = [{
+        "start": 0.0,
+        "end": round(total_dur, 2),
+        "label": "A",
+        "structural_label": "A",
+        "section_type": "Unknown",
+        "semantic_label": "Unknown",
+        "semantic_confidence": 0.0,
+        "semantic_reason": "No reliable boundary evidence.",
+        "label_method": "fallback",
+        "label_confidence": 0.35,
+    }]
     if frame_times.size == 0:
         return fallback
 
@@ -722,12 +756,14 @@ def _cluster_and_label_segments(
         return fallback
 
     labels_arr: np.ndarray | None = None
+    label_method = "feature_clustering"
     if ssm_thresh is not None:
         labels_arr = _ssm_segment_labels(
             ssm_thresh, frame_times, seg_spans,
             fixed_k=None if auto_n_clusters else min(n_clusters, len(seg_spans)),
         )
         if labels_arr is not None:
+            label_method = "ssm_similarity"
             logger.info("SSM-based labels: k=%d, n_segs=%d", len(set(labels_arr)), len(seg_spans))
 
     if labels_arr is None:
@@ -769,12 +805,25 @@ def _cluster_and_label_segments(
             "start": round(t0, 2),
             "end": round(t1, 2),
             "label": id_to_char[int(lbl)],
+            "structural_label": id_to_char[int(lbl)],
             "confidence": confidence,
             "source_features": sources,
+            "cluster_id": int(lbl),
+            "label_method": label_method,
+            "label_confidence": 0.75 if label_method == "ssm_similarity" else 0.55,
         })
 
     enforced = _enforce_min_segment_duration(raw_segs, min_dur=min_seg_dur, total_dur=total_dur)
-    return _assign_section_types(enforced, total_dur)
+    for seg in enforced:
+        seg["structural_label"] = seg.get("structural_label") or seg.get("label", "A")
+        seg["label"] = seg["structural_label"]
+        seg.setdefault("label_method", label_method)
+        seg.setdefault("label_confidence", 0.65 if label_method == "ssm_similarity" else 0.5)
+    return assign_semantic_labels(
+        enforced,
+        duration_seconds=total_dur,
+        enabled=semantic_labeling_enabled,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -866,20 +915,22 @@ def process_file_path(file_path: str, params: dict | None = None) -> dict:
     """
     logger.info("Starting analysis for file: %s", file_path)
     try:
-        with open(file_path, "rb") as fh:
-            content = fh.read()
         filename = file_path.rsplit("/", 1)[-1]
-        return _analyze_content(content, filename, content_type="audio/wav", params=params)
+        # Load directly from the file path — avoids the bytes→BytesIO roundtrip
+        # that forces audioread to buffer MP3 through a temp file (adds ~10s).
+        return _analyze_content(None, filename, content_type="audio/mpeg",
+                                params=params, _file_path=file_path)
     except Exception:
         logger.error("Error processing %s", file_path, exc_info=True)
         raise
 
 
 def _analyze_content(
-    content: bytes,
+    content: bytes | None,
     filename: str,
     content_type: str = "audio/wav",
     params: dict | None = None,
+    _file_path: str | None = None,
 ) -> dict:
     """
     Core segmentation pipeline.
@@ -897,8 +948,12 @@ def _analyze_content(
       novelty_prominence            float  default 0.18
       use_beat_sync                 bool   default True (snap boundaries to beats)
       feature_weights               dict   optional multi-feature fusion weights
+      feature_fusion_threshold      float  default 0.30
+      feature_fusion_merge_window_seconds float default 2.75
+      boundary_density_seconds      float  default 9.0
       timed_lyrics                  list   optional [{time_seconds, text}, ...]
       return_diagnostics            bool   default False
+      semantic_labeling_enabled     bool   default True
     """
     t_total = time.perf_counter()
     p = params or {}
@@ -915,6 +970,10 @@ def _analyze_content(
     prominence   = float(p.get("novelty_prominence",            _PROMINENCE))
     use_beat_sync = bool(p.get("use_beat_sync",                 True))
     return_diagnostics = bool(p.get("return_diagnostics",       False))
+    feature_fusion_threshold = float(p.get("feature_fusion_threshold", 0.30))
+    feature_fusion_merge_window_s = float(p.get("feature_fusion_merge_window_seconds", 2.75))
+    boundary_density_seconds = float(p.get("boundary_density_seconds", 22.0))
+    semantic_labeling_enabled = bool(p.get("semantic_labeling_enabled", True))
     feature_weights = normalise_feature_weights(
         p.get("feature_weights"),
         p.get("spectral_flux_weight"),
@@ -922,7 +981,14 @@ def _analyze_content(
 
     # --- Stage 0: Load audio ---
     t0 = time.perf_counter()
-    y, sr = _load_audio_from_bytes(content)
+    if _file_path is not None:
+        if _FFMPEG_BIN:
+            y, sr = _load_audio_ffmpeg(_file_path, _SR)
+        else:
+            y, sr = librosa.load(_file_path, sr=_SR, mono=True)
+            y = y.astype(np.float32)
+    else:
+        y, sr = _load_audio_from_bytes(content)
     original_dur = float(librosa.get_duration(y=y, sr=sr))
     logger.info("[%.2fs] Audio loaded: sr=%d, duration=%.2fs",
                 time.perf_counter() - t0, sr, original_dur)
@@ -1085,15 +1151,17 @@ def _analyze_content(
 
     # --- Stage 6: Filtering, fusion, and snapping ---
     t0 = time.perf_counter()
-    # One boundary per ~9s on average: SALAMI coarse sections are mostly
-    # 10-25s, but intros/outros and transitions are shorter — a 12s prior
-    # capped recall hard.
-    boundary_budget = max(1, int(core_dur / 9.0) - 1)
-    fused_boundaries = fuse_boundary_candidates(
+    # Feature-level fusion boundary budget: one boundary per configured
+    # density interval on average.  This is a tunable prior, not an
+    # algorithm-level fusion step.
+    boundary_budget = max(1, int(core_dur / max(boundary_density_seconds, 1.0)) - 1)
+    fused_boundaries = fuse_feature_candidates(
         all_candidates,
         weights=dynamic_weights,
         total_dur=core_dur,
         min_seg_dur=min_seg_dur,
+        merge_window_s=feature_fusion_merge_window_s,
+        threshold=feature_fusion_threshold,
         max_boundaries=boundary_budget,
     )
     snapped_boundaries = snap_fused_boundaries(
@@ -1134,6 +1202,7 @@ def _analyze_content(
         energy_curve=rms_novelty,
         boundary_metadata=snapped_boundaries,
         ssm_thresh=S_thresh,
+        semantic_labeling_enabled=semantic_labeling_enabled,
     )
     logger.info("[%.2fs] %d segments after clustering", time.perf_counter() - t0, len(segments_core))
 
@@ -1146,7 +1215,8 @@ def _analyze_content(
     for item in snapped_boundaries:
         candidate_boundaries.append({
             "time": round(float(item["time"]) + act_start, 2),
-            "source": item.get("sources", []),
+            "source": "feature_fusion",
+            "sources": item.get("sources", []),
             "confidence": item.get("confidence", 0.5),
         })
 
@@ -1167,6 +1237,12 @@ def _analyze_content(
             "static_feature_weights": {k: round(v, 4) for k, v in feature_weights.items()},
             "source_confidences": {k: round(v, 4) for k, v in source_confidences.items()},
             "dynamic_feature_weights": {k: round(v, 4) for k, v in dynamic_weights.items()},
+            "feature_fusion": {
+                "threshold": round(feature_fusion_threshold, 4),
+                "merge_window_seconds": round(feature_fusion_merge_window_s, 3),
+                "boundary_density_seconds": round(boundary_density_seconds, 3),
+                "boundary_budget": boundary_budget,
+            },
             "raw_candidate_counts": {
                 "rms": len(rms_candidates),
                 "onset_flux": len(onset_candidates),

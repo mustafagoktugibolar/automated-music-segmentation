@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 import time
+import traceback
 
 from shared.blob_helper import AzureBlobCacheHelper
 from shared.logger import get_logger
@@ -28,6 +29,31 @@ class BaseWorker(ABC):
     @abstractmethod
     def process_task(self, task: dict) -> dict:
         pass
+
+    def _failure_result(self, task: dict, exc: Exception) -> dict:
+        worker_type = os.getenv("WORKER_TYPE", self.service_name)
+        algorithm = task.get("algorithm")
+        if not algorithm:
+            if worker_type == "custom_segmentation":
+                algorithm = "custom_librosa"
+            elif worker_type == "msaf_segmentation":
+                algorithm = os.getenv("MSAF_ALGORITHM", "msaf")
+            elif worker_type == "fusion_segmentation":
+                algorithm = "fusion"
+            elif worker_type == "llm_segmentation":
+                algorithm = "llm"
+        return {
+            "task_id": task.get("task_id"),
+            "status": "failed",
+            "worker_type": worker_type,
+            "algorithm": algorithm,
+            "segments": [],
+            "boundaries": [],
+            "diagnostics": {
+                "error": str(exc),
+                "traceback": traceback.format_exc(limit=5),
+            },
+        }
 
     def _get_blob_helper(self) -> AzureBlobCacheHelper:
         if self._blob_helper is None:
@@ -84,11 +110,21 @@ class BaseWorker(ABC):
 
                 self.rabbitmq.connection.add_callback_threadsafe(_ack_and_publish)
 
-            except Exception:
+            except Exception as exc:
                 logger.error(f"[{self.service_name}] Task processing failed", exc_info=True)
-                self.rabbitmq.connection.add_callback_threadsafe(
-                    lambda: ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                )
+                failure_result = self._failure_result(body, exc)
+
+                def _publish_failure_and_ack():
+                    try:
+                        self.rabbitmq.publish(
+                            exchange="segmentation_topic",
+                            routing_key="segmentation.result",
+                            message=failure_result,
+                        )
+                    finally:
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+                self.rabbitmq.connection.add_callback_threadsafe(_publish_failure_and_ack)
 
         self._executor.submit(_run)
 

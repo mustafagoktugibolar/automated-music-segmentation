@@ -25,10 +25,11 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.db.models import BatchEvalJob, DatasetTrack, EvaluationRun, SegmentationTask
 from backend.db.postgreSQL import SessionLocal
-from backend.services.evaluation_service import compute_boundary_metrics
+from backend.services.evaluation_service import compute_boundary_metrics, compute_boundary_metrics_multi
 from backend.services.salami_parser import parse_salami_annotation
+from backend.services.segmentation_orchestrator import SegmentationOrchestrator
 from shared.logger import get_logger
-from shared.rabbitmq import RabbitMQClient
+from shared.segmentation_utils import BASELINE_ALGORITHMS, canonical_algorithm_name, extract_segments
 
 logger = get_logger()
 router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
@@ -141,7 +142,12 @@ def _download_from_minio(song_id: str) -> Optional[bytes]:
     return None
 
 
-def _dispatch_to_worker(audio_bytes: bytes, filename: str, algorithm: str = "custom", llm_mode: str = "deterministic") -> str:
+def _dispatch_to_worker(
+    audio_bytes: bytes,
+    filename: str,
+    algorithm: str | list[str] = "custom_librosa",
+    llm_mode: str = "deterministic",
+) -> str:
     """Save audio to disk, create DB task, publish to RabbitMQ. Returns task_id."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     task_id   = str(uuid.uuid4())
@@ -150,8 +156,11 @@ def _dispatch_to_worker(audio_bytes: bytes, filename: str, algorithm: str = "cus
     with open(file_path, "wb") as fh:
         fh.write(audio_bytes)
 
-    routing_key = "segmentation.llm" if algorithm == "llm" else "segmentation.custom"
-    requested_params = {"llm_segmentation": {"mode": llm_mode}} if algorithm == "llm" else None
+    requested_algorithms = algorithm if isinstance(algorithm, list) else [algorithm]
+    orchestrator = SegmentationOrchestrator()
+    algorithms = orchestrator._normalize_algorithms(requested_algorithms)
+    expected_algorithms, dispatch_algorithms = orchestrator._expand_requested_algorithms(algorithms)
+    requested_params = {"llm_segmentation": {"mode": llm_mode}} if "llm" in algorithms else {}
 
     db = SessionLocal()
     try:
@@ -160,7 +169,7 @@ def _dispatch_to_worker(audio_bytes: bytes, filename: str, algorithm: str = "cus
             filename=filename,
             status="processing",
             results={},
-            expected_algorithms=[algorithm],
+            expected_algorithms=expected_algorithms,
             source_type="upload",
             requested_params=requested_params,
         ))
@@ -171,20 +180,16 @@ def _dispatch_to_worker(audio_bytes: bytes, filename: str, algorithm: str = "cus
     finally:
         db.close()
 
-    rmq = RabbitMQClient(service_name="batch_eval")
-    rmq.publish(
-        exchange="segmentation_topic",
-        routing_key=routing_key,
-        message={
-            "task_id": task_id,
-            "source_type": "upload",
-            "original_filename": filename,
-            "file_path": file_path,
-            "content_type": "audio/mpeg",
-            "algorithms": [algorithm],
-            "params": requested_params or {},
-        },
-    )
+    task_payload = {
+        "task_id": task_id,
+        "source_type": "upload",
+        "original_filename": filename,
+        "file_path": file_path,
+        "content_type": "audio/mpeg",
+        "algorithms": algorithms,
+        "params": requested_params or {},
+    }
+    orchestrator._publish_tasks(task_payload, dispatch_algorithms)
     return task_id
 
 
@@ -238,39 +243,58 @@ def _batch_summary(rows: list[dict], tolerance: float) -> str:
 
     def mean(xs): return sum(xs) / len(xs) if xs else 0.0
 
-    prec  = mean([r["precision"]  for r in ok])
-    rec   = mean([r["recall"]     for r in ok])
-    f1    = mean([r["f_measure"]  for r in ok])
-    r_ref = mean([r["n_ref"]      for r in ok])
-    r_est = mean([r["n_est"]      for r in ok])
-    ratio = r_est / r_ref if r_ref > 0 else 0
-
-    seg_note = "over-segmenting" if ratio > 2 else ("under-segmenting" if ratio < 0.5 else "ok")
+    included = [r for r in ok if not r.get("is_outlier", False)]
+    outlier_count = len(ok) - len(included)
 
     lines = [
         f"Tracks OK   : {len(ok)} / {len(rows)}",
+        f"Outliers    : {outlier_count} (F1@3s < threshold, excluded from filtered avg)",
         f"Tolerance   : ±{tolerance}s",
-        f"Precision   : {prec:.3f}",
-        f"Recall      : {rec:.3f}",
-        f"F-measure   : {f1:.3f}",
-        f"Avg est/ref : {r_est:.1f} / {r_ref:.1f}  [{seg_note}]",
+        "",
+        "Algorithm comparison (included / filtered):",
+        "algorithm          avg_f1_0_5   avg_f1_3_0   filtered_f1   avg_precision_0_5   avg_recall_0_5   avg_est/ref",
+    ]
+
+    by_algorithm: dict[str, list[dict]] = {}
+    for row in ok:
+        by_algorithm.setdefault(row.get("algorithm", "unknown"), []).append(row)
+
+    for algorithm, algo_rows in sorted(by_algorithm.items()):
+        included_algo = [r for r in algo_rows if not r.get("is_outlier", False)]
+        avg_f1_0_5   = mean([r.get("f1_0_5", r.get("f_measure", 0.0)) for r in algo_rows])
+        avg_f1_3_0   = mean([r.get("f1_3_0", 0.0) for r in algo_rows])
+        filtered_f1  = mean([r.get("f_measure", 0.0) for r in included_algo])
+        avg_p_0_5    = mean([r.get("precision_0_5", r.get("precision", 0.0)) for r in algo_rows])
+        avg_r_0_5    = mean([r.get("recall_0_5", r.get("recall", 0.0)) for r in algo_rows])
+        r_ref  = mean([r["n_ref"] for r in algo_rows])
+        r_est  = mean([r["n_est"] for r in algo_rows])
+        ratio  = r_est / r_ref if r_ref > 0 else 0
+        lines.append(
+            f"{algorithm:<18} {avg_f1_0_5:>10.3f}   {avg_f1_3_0:>10.3f}   "
+            f"{filtered_f1:>11.3f}   "
+            f"{avg_p_0_5:>17.3f}   {avg_r_0_5:>14.3f}   {ratio:>10.2f}"
+        )
+
+    lines.extend([
         "",
         "Worst tracks:",
-    ]
+    ])
     for r in sorted(ok, key=lambda x: x["f_measure"])[:5]:
-        lines.append(f"  {r['song_id']:>6}  {r['title'][:32]:<32}  F1={r['f_measure']:.3f}  est={r['n_est']}  ref={r['n_ref']}")
+        lines.append(f"  {r['song_id']:>6}  {r.get('algorithm', '?'):<14}  {r['title'][:28]:<28}  F1={r['f_measure']:.3f}  est={r['n_est']}  ref={r['n_ref']}")
     lines.append("")
     lines.append("Best tracks:")
     for r in sorted(ok, key=lambda x: x["f_measure"], reverse=True)[:5]:
-        lines.append(f"  {r['song_id']:>6}  {r['title'][:32]:<32}  F1={r['f_measure']:.3f}  est={r['n_est']}  ref={r['n_ref']}")
+        lines.append(f"  {r['song_id']:>6}  {r.get('algorithm', '?'):<14}  {r['title'][:28]:<28}  F1={r['f_measure']:.3f}  est={r['n_est']}  ref={r['n_ref']}")
     return "\n".join(lines)
 
 
 def _save_batch_job_result(job_id: str, rows: list[dict], summary: str | None, error: str | None) -> None:
-    ok_rows = [r for r in rows if not r.get("error")]
-    avg_p = sum(r["precision"]  for r in ok_rows) / len(ok_rows) if ok_rows else None
-    avg_r = sum(r["recall"]     for r in ok_rows) / len(ok_rows) if ok_rows else None
-    avg_f = sum(r["f_measure"]  for r in ok_rows) / len(ok_rows) if ok_rows else None
+    ok_rows      = [r for r in rows if not r.get("error")]
+    included     = [r for r in ok_rows if not r.get("is_outlier", False)]
+    use_rows     = included if included else ok_rows   # fall back to all if every row is an outlier
+    avg_p = sum(r["precision"]  for r in use_rows) / len(use_rows) if use_rows else None
+    avg_r = sum(r["recall"]     for r in use_rows) / len(use_rows) if use_rows else None
+    avg_f = sum(r["f_measure"]  for r in use_rows) / len(use_rows) if use_rows else None
 
     db = SessionLocal()
     try:
@@ -294,9 +318,24 @@ def _save_batch_job_result(job_id: str, rows: list[dict], summary: str | None, e
         db.close()
 
 
-async def _run_batch_eval_async(job_id: str, max_tracks: int, tolerance: float, concurrency: int, algorithm: str = "custom", llm_mode: str = "deterministic") -> None:
+async def _run_batch_eval_async(
+    job_id: str,
+    max_tracks: int,
+    tolerance: float,
+    concurrency: int,
+    algorithms: list[str] | None = None,
+    llm_mode: str = "deterministic",
+    tolerances: list[float] | None = None,
+    coverage_outlier_threshold: float = 0.20,
+) -> None:
     job = _batch_jobs[job_id]
     sem = asyncio.Semaphore(concurrency)
+    requested_algorithms = [canonical_algorithm_name(a) for a in (algorithms or ["custom_librosa"])]
+    if "fusion" in requested_algorithms:
+        algorithms_to_evaluate = list(dict.fromkeys([*BASELINE_ALGORITHMS, "fusion"]))
+    else:
+        algorithms_to_evaluate = requested_algorithms
+    tolerances = tolerances or [tolerance, 3.0]
 
     def log(line: str) -> None:
         job["lines"].append(line)
@@ -317,30 +356,43 @@ async def _run_batch_eval_async(job_id: str, max_tracks: int, tolerance: float, 
                     log(f"[{idx:>3}/{total}] {sid}  skip: not found in MinIO")
                     return {"song_id": sid, "title": title, "error": "minio_not_found"}
 
-                task_id = await asyncio.to_thread(_dispatch_to_worker, audio, f"{sid}.mp3", algorithm, llm_mode)
+                task_id = await asyncio.to_thread(_dispatch_to_worker, audio, f"{sid}.mp3", requested_algorithms, llm_mode)
 
                 results = await _wait_for_task_async(task_id)
                 if not results:
                     log(f"[{idx:>3}/{total}] {sid}  skip: timeout / worker failed")
                     return {"song_id": sid, "title": title, "error": "timeout"}
 
-                est = next(iter(results.values()), [])
-                m2  = compute_boundary_metrics(ref, est, tolerance=tolerance)
-                log(
-                    f"[{idx:>3}/{total}] {sid}  "
-                    f"P={m2['precision']:.3f}  R={m2['recall']:.3f}  F1={m2['f_measure']:.3f}"
-                    f"  (est={m2['n_boundaries_est']}/ref={m2['n_boundaries_ref']})"
-                )
-                return {
-                    "song_id":   sid,
-                    "title":     title,
-                    "n_ref":     m2["n_boundaries_ref"],
-                    "n_est":     m2["n_boundaries_est"],
-                    "precision": m2["precision"],
-                    "recall":    m2["recall"],
-                    "f_measure": m2["f_measure"],
-                    "error":     "",
-                }
+                rows: list[dict] = []
+                for algo in algorithms_to_evaluate:
+                    est = extract_segments(results.get(algo))
+                    if not est:
+                        rows.append({"song_id": sid, "title": title, "algorithm": algo, "error": "missing_result"})
+                        continue
+                    m2 = compute_boundary_metrics(ref, est, tolerance=tolerance)
+                    m_multi = compute_boundary_metrics_multi(ref, est, tolerances=tolerances)
+                    row = {
+                        "song_id":   sid,
+                        "title":     title,
+                        "algorithm": algo,
+                        "n_ref":     m2["n_boundaries_ref"],
+                        "n_est":     m2["n_boundaries_est"],
+                        "precision": m2["precision"],
+                        "recall":    m2["recall"],
+                        "f_measure": m2["f_measure"],
+                        "error":     "",
+                    }
+                    row.update({k: v for k, v in m_multi.items() if k != "by_tolerance"})
+                    row["is_outlier"] = row.get("f1_3_0", 0.0) < coverage_outlier_threshold
+                    rows.append(row)
+
+                ok_parts = [
+                    f"{r['algorithm']} F1={r.get('f_measure', 0):.3f}"
+                    for r in rows
+                    if not r.get("error")
+                ]
+                log(f"[{idx:>3}/{total}] {sid}  " + " | ".join(ok_parts))
+                return rows
         except Exception as exc:
             import traceback
             log(f"[{idx:>3}/{total}] {sid}  EXCEPTION: {exc}")
@@ -368,7 +420,13 @@ async def _run_batch_eval_async(job_id: str, max_tracks: int, tolerance: float, 
             eval_one(sid, meta.get(sid, {}).get("title", sid), i, len(candidates))
             for i, sid in enumerate(candidates, 1)
         ]
-        rows: list[dict] = list(await asyncio.gather(*coros))
+        gathered = list(await asyncio.gather(*coros))
+        rows: list[dict] = []
+        for item in gathered:
+            if isinstance(item, list):
+                rows.extend(item)
+            else:
+                rows.append(item)
 
         summary = _batch_summary(rows, tolerance)
         job["summary"] = summary
@@ -399,10 +457,14 @@ class BatchEvalRequest(BaseModel):
     max_tracks: int  = Field(default=20, ge=0, le=500,
                              description="0 = all available tracks")
     tolerance_seconds: float = Field(default=0.5, gt=0, le=10)
+    tolerances: list[float] = Field(default_factory=lambda: [0.5, 3.0])
+    algorithms: list[str] = Field(default_factory=lambda: ["custom_librosa", "foote", "cnmf", "scluster", "fusion"])
     concurrency: int = Field(default=3, ge=1, le=10,
                              description="Parallel tracks (match your worker count)")
     include_llm: bool = False
     llm_mode: Literal["deterministic", "ai_generated"] = "deterministic"
+    coverage_outlier_threshold: float = Field(default=0.20, ge=0.0, le=1.0,
+                                              description="Tracks whose F1@3s < threshold are flagged as outliers")
 
 
 class EvaluationRunRequest(BaseModel):
@@ -429,7 +491,18 @@ class CompareRequest(BaseModel):
 async def start_batch_eval(req: BatchEvalRequest):
     """Start a background SALAMI batch evaluation job. Returns job_id."""
     job_id = str(uuid.uuid4())
-    _batch_jobs[job_id] = {"lines": [], "done": False, "error": None, "summary": None, "rows": [], "algorithm": "llm" if req.include_llm else "custom", "llm_mode": req.llm_mode}
+    algorithms = ["llm"] if req.include_llm else [canonical_algorithm_name(a) for a in req.algorithms]
+    tolerances = req.tolerances or [req.tolerance_seconds, 3.0]
+    _batch_jobs[job_id] = {
+        "lines": [],
+        "done": False,
+        "error": None,
+        "summary": None,
+        "rows": [],
+        "algorithms": algorithms,
+        "tolerances": tolerances,
+        "llm_mode": req.llm_mode,
+    }
 
     def _create_record():
         db = SessionLocal()
@@ -451,7 +524,16 @@ async def start_batch_eval(req: BatchEvalRequest):
 
     await run_in_threadpool(_create_record)
     asyncio.create_task(
-        _run_batch_eval_async(job_id, req.max_tracks, req.tolerance_seconds, req.concurrency, "llm" if req.include_llm else "custom", req.llm_mode)
+        _run_batch_eval_async(
+            job_id,
+            req.max_tracks,
+            req.tolerance_seconds,
+            req.concurrency,
+            algorithms,
+            req.llm_mode,
+            tolerances,
+            req.coverage_outlier_threshold,
+        )
     )
     return {"job_id": job_id}
 
@@ -581,7 +663,10 @@ async def run_evaluation(req: EvaluationRunRequest):
                 raise ValueError("Task has no results yet")
 
             eval_results = {}
-            for algo_name, segments in results.items():
+            for algo_name, raw_result in results.items():
+                if "__" in str(algo_name):
+                    continue
+                segments = extract_segments(raw_result)
                 if not segments:
                     continue
 
@@ -590,6 +675,7 @@ async def run_evaluation(req: EvaluationRunRequest):
                     est_segments=segments,
                     tolerance=req.tolerance_seconds,
                 )
+                metrics.update(compute_boundary_metrics_multi(ref_segments, segments))
 
                 # Store evaluation run
                 eval_run = EvaluationRun(
@@ -638,8 +724,8 @@ async def compare_algorithms(req: CompareRequest):
     Accepts a mapping of algorithm_name → task_id. Each task must be completed.
     Computes boundary metrics for each algorithm and returns a side-by-side comparison.
 
-    Use POST /algorithms/{id}/test or POST /segmentation/upload first to get task_ids,
-    then call this endpoint once all tasks are completed.
+    Use POST /segmentation/upload first to get task_ids, then call this endpoint
+    once all tasks are completed.
     """
 
     def _compare():
@@ -664,10 +750,15 @@ async def compare_algorithms(req: CompareRequest):
                     comparison[algo_name] = {"error": f"Task status is '{task.status}'", "task_id": task_id}
                     continue
 
-                # For user code tasks the result key is the algorithm_id; for built-in it's the algo name
                 results = task.results or {}
-                # Try to find segments: first by algo_name, then by first key
-                segments = results.get(algo_name) or (list(results.values())[0] if results else None)
+                canonical_algo = canonical_algorithm_name(algo_name)
+                segments = extract_segments(results.get(canonical_algo) or results.get(algo_name))
+                if not segments:
+                    for key, value in results.items():
+                        if "__" not in str(key):
+                            segments = extract_segments(value)
+                            if segments:
+                                break
 
                 if not segments:
                     comparison[algo_name] = {"error": "No segments in task results"}
@@ -678,6 +769,7 @@ async def compare_algorithms(req: CompareRequest):
                     est_segments=segments,
                     tolerance=req.tolerance_seconds,
                 )
+                metrics.update(compute_boundary_metrics_multi(ref_segments, segments))
 
                 # Store evaluation run
                 eval_run = EvaluationRun(
@@ -782,9 +874,13 @@ async def get_segmentations_for_track(track_id: str):
             items = []
             for eval_run, task in runs:
                 results = task.results if task and task.results else {}
-                segments = results.get(eval_run.algorithm_name)
+                segments = extract_segments(results.get(canonical_algorithm_name(eval_run.algorithm_name)))
                 if not segments and results:
-                    segments = list(results.values())[0]
+                    for key, value in results.items():
+                        if "__" not in str(key):
+                            segments = extract_segments(value)
+                            if segments:
+                                break
 
                 items.append(
                     {

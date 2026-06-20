@@ -1,5 +1,6 @@
 <script>
   import { onDestroy, onMount } from "svelte";
+  import * as XLSX from "xlsx";
   import { startBatchEval, subscribeToBatchEval, listBatchEvalHistory } from "../lib/api.js";
 
   // ── Config ────────────────────────────────────────────────────────────────
@@ -50,6 +51,9 @@
 
   $: successRows = displayRows.filter((r) => !r.error);
 
+  $: outlierRows  = successRows.filter((r) => r.is_outlier);
+  $: includedRows = successRows.filter((r) => !r.is_outlier);
+
   $: errorCount = isDone
     ? finalRows.filter((r) => r.error).length
     : logLines.filter((l) => /skip|download_failed|FATAL/i.test(l)).length;
@@ -57,6 +61,7 @@
   $: avgPrecision = computeAvg(successRows, "precision");
   $: avgRecall    = computeAvg(successRows, "recall");
   $: avgF1        = computeAvg(successRows, "f_measure");
+  $: adjF1        = computeAvg(includedRows, "f_measure");
 
   $: sortedRows = [...successRows].sort((a, b) => {
     const af = a.f_measure ?? 0;
@@ -235,6 +240,28 @@
     setTimeout(() => { copied = false; }, 2000);
   }
 
+  function exportExcel() {
+    const rows = finalRows.filter(r => !r.error);
+    if (!rows.length) return;
+    const data = [
+      ["ID", "Algorithm", "Title", "Precision%", "Recall%", "F1%", "F1@3s%", "n_est", "n_ref", "Seg time (s)", "Outlier"],
+      ...rows.map(r => [
+        r.song_id, r.algorithm ?? "—", r.title ?? "—",
+        r.precision != null ? +(r.precision * 100).toFixed(2) : "",
+        r.recall    != null ? +(r.recall    * 100).toFixed(2) : "",
+        r.f_measure != null ? +(r.f_measure * 100).toFixed(2) : "",
+        r.f1_3_0    != null ? +(r.f1_3_0   * 100).toFixed(2) : "",
+        r.n_est ?? "", r.n_ref ?? "",
+        r.seg_time_s != null ? +r.seg_time_s.toFixed(3) : "",
+        r.is_outlier ? "YES" : "no",
+      ]),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Batch Eval");
+    XLSX.writeFile(wb, `batch_eval_${jobId ?? "run"}.xlsx`);
+  }
+
   // ── History helpers ───────────────────────────────────────────────────────
   async function loadHistory() {
     historyLoading = true;
@@ -397,7 +424,7 @@
             </button>
           {/each}
         </div>
-        <p class="mt-1 text-[10px] text-zinc-600">Parallel tracks — match custom worker containers</p>
+        <p class="mt-1 text-[10px] text-zinc-600">Parallel tracks — match available worker capacity</p>
       </div>
 
       <!-- Tolerance slider -->
@@ -611,7 +638,7 @@
               <p class="mt-2 max-w-md text-sm text-zinc-400">
                 Configure max tracks and tolerance in the sidebar, then press
                 <span class="text-zinc-200 font-medium">{runAllDataset ? "Run All Dataset" : "Run Batch Eval"}</span> to start evaluating
-                the custom algorithm against the full SALAMI dataset.
+                selected algorithms against the full SALAMI dataset.
               </p>
             </div>
             <div class="rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-right shrink-0">
@@ -647,8 +674,8 @@
 
     {:else}
 
-      <!-- ── STATS BAR (4 cards) ─────────────────────────────────────────── -->
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+      <!-- ── STATS BAR ──────────────────────────────────────────────────── -->
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
 
         <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-4 flex flex-col gap-1">
           <span class="text-2xl font-bold tabular-nums text-zinc-100">{fmtPct(avgPrecision)}</span>
@@ -662,7 +689,12 @@
 
         <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-4 flex flex-col gap-1">
           <span class="text-2xl font-bold tabular-nums {f1ColorClass(avgF1)}">{fmtPct(avgF1)}</span>
-          <span class="text-[10px] uppercase tracking-wider text-zinc-500">Avg F1</span>
+          <span class="text-[10px] uppercase tracking-wider text-zinc-500">Avg F1 (raw)</span>
+        </div>
+
+        <div class="rounded-2xl border border-indigo-800/40 bg-indigo-500/5 px-4 py-4 flex flex-col gap-1">
+          <span class="text-2xl font-bold tabular-nums {f1ColorClass(adjF1)}">{fmtPct(adjF1)}</span>
+          <span class="text-[10px] uppercase tracking-wider text-indigo-400">Adj F1 (–outliers)</span>
         </div>
 
         <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-4 flex flex-col gap-1">
@@ -670,6 +702,11 @@
             {successRows.length}{progressTotal > 0 ? "/" + progressTotal : ""}
           </span>
           <span class="text-[10px] uppercase tracking-wider text-zinc-500">Tracks Evaluated</span>
+        </div>
+
+        <div class="rounded-2xl border border-amber-800/30 bg-amber-500/5 px-4 py-4 flex flex-col gap-1">
+          <span class="text-2xl font-bold tabular-nums {outlierRows.length > 0 ? 'text-amber-400' : 'text-zinc-400'}">{outlierRows.length}</span>
+          <span class="text-[10px] uppercase tracking-wider text-amber-500/70">Outliers ⚠</span>
         </div>
 
         <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-4 flex flex-col gap-1">
@@ -722,16 +759,24 @@
             {/if}
           </div>
           {#if isDone && finalRows.length > 0}
-            <button
-              on:click={copyReport}
-              class="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition-colors"
-            >
-              {#if copied}
-                <span class="text-emerald-400">Copied!</span>
-              {:else}
-                Copy TSV Report
-              {/if}
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                on:click={exportExcel}
+                class="flex items-center gap-1.5 rounded-xl border border-emerald-800/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+              >
+                ⬇ Export Excel
+              </button>
+              <button
+                on:click={copyReport}
+                class="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition-colors"
+              >
+                {#if copied}
+                  <span class="text-emerald-400">Copied!</span>
+                {:else}
+                  Copy TSV Report
+                {/if}
+              </button>
+            </div>
           {/if}
         </div>
 
@@ -747,6 +792,7 @@
               <thead class="border-b border-zinc-800 bg-zinc-900/80 sticky top-0">
                 <tr>
                   <th class="px-4 py-2.5 text-left text-xs font-medium text-zinc-400 whitespace-nowrap">ID</th>
+                  <th class="px-4 py-2.5 text-left text-xs font-medium text-zinc-400 whitespace-nowrap">Algorithm</th>
                   <th class="px-4 py-2.5 text-left text-xs font-medium text-zinc-400">Title</th>
                   {#if isDone}
                     <th class="px-4 py-2.5 text-right text-xs font-medium text-zinc-400 whitespace-nowrap">Precision</th>
@@ -762,15 +808,18 @@
                     </button>
                   </th>
                   {#if isDone}
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-zinc-400 whitespace-nowrap">F1@3s</th>
                     <th class="px-4 py-2.5 text-right text-xs font-medium text-zinc-400 whitespace-nowrap">est / ref</th>
                     <th class="px-4 py-2.5 text-right text-xs font-medium text-zinc-400 whitespace-nowrap">Seg time</th>
+                    <th class="px-4 py-2.5 text-center text-xs font-medium text-amber-500/70 whitespace-nowrap">⚠</th>
                   {/if}
                 </tr>
               </thead>
               <tbody>
-                {#each sortedRows as row (row.song_id)}
-                  <tr class="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
+                {#each sortedRows as row (`${row.song_id}-${row.algorithm ?? "default"}`)}
+                  <tr class={"border-b border-zinc-800/40 transition-colors " + (row.is_outlier ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-zinc-800/20")}>
                     <td class="px-4 py-2 text-xs text-zinc-500 font-mono whitespace-nowrap">{row.song_id}</td>
+                    <td class="px-4 py-2 text-xs text-zinc-300 font-mono whitespace-nowrap">{row.algorithm ?? "custom_librosa"}</td>
                     <td class="px-4 py-2 text-zinc-300 max-w-[180px]">
                       <span class="block truncate" title={row.title ?? "—"}>{row.title ?? "—"}</span>
                     </td>
@@ -782,11 +831,19 @@
                       {fmtPct(row.f_measure)}
                     </td>
                     {#if isDone}
+                      <td class="px-4 py-2 text-right text-zinc-500 tabular-nums text-xs whitespace-nowrap">{fmtPct(row.f1_3_0)}</td>
                       <td class="px-4 py-2 text-right text-zinc-500 text-xs whitespace-nowrap">
                         {row.n_est ?? "—"} / {row.n_ref ?? "—"}
                       </td>
                       <td class="px-4 py-2 text-right text-zinc-500 text-xs whitespace-nowrap">
                         {row.seg_time_s != null ? row.seg_time_s.toFixed(2) + "s" : "—"}
+                      </td>
+                      <td class="px-4 py-2 text-center text-xs">
+                        {#if row.is_outlier}
+                          <span title="F1@3s < 20% — excluded from adjusted F1" class="text-amber-400">⚠</span>
+                        {:else}
+                          <span class="text-zinc-800">—</span>
+                        {/if}
                       </td>
                     {/if}
                   </tr>

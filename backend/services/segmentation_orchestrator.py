@@ -11,6 +11,7 @@ from backend.db.postgreSQL import SessionLocal
 from shared.blob_helper import AzureBlobCacheHelper
 from shared.logger import get_logger
 from shared.rabbitmq import RabbitMQClient
+from shared.segmentation_utils import BASELINE_ALGORITHMS, canonical_algorithm_name
 
 logger = get_logger()
 
@@ -28,12 +29,12 @@ class SegmentationOrchestrator:
     def __init__(self):
         self.rabbitmq = RabbitMQClient(service_name="segmentation_orchestrator")
         self.algo_to_routing_key = {
-            "custom": "segmentation.custom",
+            "custom_librosa": "segmentation.custom",
             "foote": "segmentation.foote",
             "cnmf": "segmentation.cnmf",
             "scluster": "segmentation.scluster",
+            "fusion": "segmentation.fusion",
             "llm": "segmentation.llm",
-            "user_code": "segmentation.user_code",
         }
         self._blob_helper = None
 
@@ -52,7 +53,7 @@ class SegmentationOrchestrator:
     def _normalize_algorithms(self, requested_algos: list[str]) -> list[str]:
         normalized: list[str] = []
         for algo in requested_algos:
-            candidate = str(algo).lower().strip()
+            candidate = canonical_algorithm_name(algo)
             if candidate in ALLOWED_ALGORITHMS and candidate not in normalized:
                 normalized.append(candidate)
             else:
@@ -63,16 +64,33 @@ class SegmentationOrchestrator:
 
         return normalized
 
+    def _expand_requested_algorithms(self, algorithms: list[str]) -> tuple[list[str], list[str]]:
+        expected = list(algorithms)
+        dispatch = [a for a in algorithms if a != "fusion"]
+
+        if "fusion" in algorithms:
+            for base_algo in BASELINE_ALGORITHMS:
+                if base_algo not in expected:
+                    expected.insert(0, base_algo)
+                if base_algo not in dispatch:
+                    dispatch.append(base_algo)
+
+        return expected, dispatch
+
     def _validate_and_trim_params(self, params: SegmentationParams | None, algorithms: list[str]) -> dict:
         payload = params.model_dump(exclude_none=True) if params else {}
         if not payload:
             return {}
 
-        if "custom" in payload and "custom" not in algorithms:
-            logger.warning("Ignoring custom params because custom algorithm was not requested")
+        custom_requested = "custom_librosa" in algorithms or "fusion" in algorithms
+        if "custom" in payload and not custom_requested:
+            logger.warning("Ignoring custom params because custom_librosa algorithm was not requested")
             payload.pop("custom", None)
+        if "custom_librosa" in payload and not custom_requested:
+            logger.warning("Ignoring custom_librosa params because custom_librosa algorithm was not requested")
+            payload.pop("custom_librosa", None)
 
-        msaf_requested = any(a in {"foote", "cnmf", "scluster"} for a in algorithms)
+        msaf_requested = any(a in {"foote", "cnmf", "scluster"} for a in algorithms) or "fusion" in algorithms
         if "msaf" in payload and not msaf_requested:
             logger.warning("Ignoring msaf params because no MSAF algorithm was requested")
             payload.pop("msaf", None)
@@ -81,6 +99,10 @@ class SegmentationOrchestrator:
         if "llm_segmentation" in payload and not llm_requested:
             logger.warning("Ignoring llm_segmentation params because llm algorithm was not requested")
             payload.pop("llm_segmentation", None)
+
+        if "fusion" in payload and "fusion" not in algorithms:
+            logger.warning("Ignoring fusion params because fusion algorithm was not requested")
+            payload.pop("fusion", None)
 
         return payload
 
@@ -141,6 +163,7 @@ class SegmentationOrchestrator:
 
     async def process_upload(self, file, requested_algos: list[str], params: SegmentationParams | None = None, webhook_url: str | None = None) -> str:
         algorithms = self._normalize_algorithms(requested_algos)
+        expected_algorithms, dispatch_algorithms = self._expand_requested_algorithms(algorithms)
         effective_params = self._validate_and_trim_params(params, algorithms)
 
         task_id = str(uuid.uuid4())
@@ -156,7 +179,7 @@ class SegmentationOrchestrator:
             self._create_task_record(
                 task_id=task_id,
                 filename=file.filename,
-                expected_algorithms=algorithms,
+                expected_algorithms=expected_algorithms,
                 source_type="upload",
                 source_song_id=None,
                 requested_params=effective_params,
@@ -172,7 +195,7 @@ class SegmentationOrchestrator:
                 "algorithms": algorithms,
                 "params": effective_params,
             }
-            self._publish_tasks(task_payload, algorithms)
+            self._publish_tasks(task_payload, dispatch_algorithms)
             return task_id
 
         except Exception:
@@ -195,6 +218,7 @@ class SegmentationOrchestrator:
             raise ValueError("song_id is required")
 
         algorithms = self._normalize_algorithms(requested_algos)
+        expected_algorithms, dispatch_algorithms = self._expand_requested_algorithms(algorithms)
         effective_params = self._validate_and_trim_params(params, algorithms)
 
         blob_name = f"songs/{song_id}.mp3"
@@ -207,7 +231,7 @@ class SegmentationOrchestrator:
         self._create_task_record(
             task_id=task_id,
             filename=f"{song_id}.mp3",
-            expected_algorithms=algorithms,
+            expected_algorithms=expected_algorithms,
             source_type="storage",
             source_song_id=song_id,
             requested_params=effective_params,
@@ -222,5 +246,5 @@ class SegmentationOrchestrator:
             "algorithms": algorithms,
             "params": effective_params,
         }
-        self._publish_tasks(task_payload, algorithms)
+        self._publish_tasks(task_payload, dispatch_algorithms)
         return task_id

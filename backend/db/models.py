@@ -8,7 +8,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -32,23 +31,6 @@ class SegmentationTask(Base):
     results = Column(JSON, default={})
     expected_algorithms = Column(JSON, default=[])
     webhook_url = Column(String, nullable=True)
-
-
-class Algorithm(Base):
-    """User-created segmentation algorithm code, versioned by name."""
-
-    __tablename__ = "algorithms"
-    __table_args__ = (UniqueConstraint("name", "version", name="uq_algorithm_name_version"),)
-
-    algorithm_id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False, index=True)
-    description = Column(Text, nullable=True)
-    code = Column(Text, nullable=False)
-    version = Column(Integer, default=1, nullable=False)
-    params_schema = Column(JSON, nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class Dataset(Base):

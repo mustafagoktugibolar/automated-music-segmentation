@@ -23,20 +23,36 @@ orchestrator = SegmentationOrchestrator()
 @router.get("/stream/{task_id}")
 async def stream_task_status(task_id: str) -> StreamingResponse:
     queue: asyncio.Queue = asyncio.Queue()
-    
+    loop = asyncio.get_running_loop()
+
     def callback(data):
-        try:
-            queue.put_nowait(data)
-        except asyncio.QueueFull:
-            pass
-    
+        # RabbitMQ consumer runs in a background thread; asyncio.Queue is not
+        # thread-safe, so we must schedule the put via the event loop.
+        loop.call_soon_threadsafe(queue.put_nowait, data)
+
+    # Register callback before the DB read to avoid missing a result that
+    # arrives between the two. If the task is already terminal, pre-fill the
+    # queue so the generator yields immediately without waiting for an event.
     register_sse_callback(task_id, callback)
-    
+
+    db = SessionLocal()
+    try:
+        task = db.query(SegmentationTask).filter(SegmentationTask.task_id == task_id).first()
+        if task and task.status in ("completed", "failed"):
+            queue.put_nowait({
+                "task_id": task.task_id,
+                "status": task.status,
+                "filename": task.filename,
+                "results": task.results,
+            })
+    finally:
+        db.close()
+
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             while True:
                 try:
-                    data = await asyncio.wait_for(queue.get(), timeout=60)
+                    data = await asyncio.wait_for(queue.get(), timeout=30)
                     yield f"data: {json.dumps(data)}\n\n"
                     if data.get("status") in ("completed", "failed"):
                         break
@@ -44,7 +60,7 @@ async def stream_task_status(task_id: str) -> StreamingResponse:
                     yield f"data: {json.dumps({'task_id': task_id, 'status': 'alive'})}\n\n"
         finally:
             unregister_sse_callback(task_id)
-    
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
@@ -76,7 +92,7 @@ def _parse_params_json(raw_params: str | None) -> SegmentationParams | None:
 @router.post("/upload")
 async def upload_and_segment_audio(
     file: UploadFile = File(..., description="Audio file (e.g., WAV, MP3)"),
-    algorithms: str = Form(default='["custom", "foote", "cnmf", "scluster"]'),
+    algorithms: str = Form(default='["custom_librosa", "foote", "cnmf", "scluster"]'),
     params: str | None = Form(default=None, description="Optional JSON object of typed segmentation params"),
     webhook_url: str | None = Form(default=None, description="Optional webhook URL to call when task completes"),
 ):

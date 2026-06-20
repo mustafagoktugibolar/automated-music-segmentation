@@ -7,7 +7,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.algorithms import router as algorithms_router
 from backend.api.datasets import router as datasets_router
 from backend.api.evaluation import router as evaluation_router
 from backend.api.health import router as health_router
@@ -65,7 +64,6 @@ async def log_requests(request: Request, call_next):
 app.include_router(health_router)
 app.include_router(segmentation_router)
 app.include_router(songs_router)
-app.include_router(algorithms_router)
 app.include_router(datasets_router)
 app.include_router(evaluation_router)
 

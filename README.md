@@ -52,11 +52,11 @@ The entire application stack (backend + database) is managed by Docker Compose.
     Once the services are running, the API will be available at `http://localhost:8000`. You can test it by navigating to:
     `http://localhost:8000/health`
 
-### Full Dataset Batch Evaluation and Custom Worker Scaling
+### Full Dataset Batch Evaluation and Worker Scaling
 
 The frontend `Batch Eval` page includes a `Run all dataset` option. It sends `max_tracks=0` to `POST /evaluation/batch`, so the backend evaluates every available SALAMI track found in MinIO with local annotations.
 
-For a 32 GB RAM / 8 core / 16 thread machine, start with four custom worker containers and one active task per container:
+For a 32 GB RAM / 8 core / 16 thread machine, start with four custom Librosa worker containers and one active task per container:
 
 ```bash
 CUSTOM_WORKER_REPLICAS=4 WORKER_CONCURRENCY=1 docker compose up -d --build
@@ -84,7 +84,7 @@ CUSTOM_WORKER_REPLICAS=2 WORKER_CONCURRENCY=1 docker compose up -d --build
   Uploads an audio file and dispatches segmentation jobs.  
   Multipart fields:
   - `file`: audio file
-  - `algorithms`: JSON list string (default: `["custom","foote","cnmf","scluster"]`)
+  - `algorithms`: JSON list string (default: `["custom_librosa","foote","cnmf","scluster"]`)
   - `params`: optional JSON string with typed worker parameters
 
 - `POST /segmentation/from-storage`  
@@ -95,6 +95,43 @@ CUSTOM_WORKER_REPLICAS=2 WORKER_CONCURRENCY=1 docker compose up -d --build
 
 - `GET /segmentation/status/{task_id}`  
   Returns task status and collected per-algorithm results.
+
+### Fusion Request Example
+
+`custom` is still accepted as a backward-compatible alias, but the canonical deterministic algorithm is `custom_librosa`.
+
+```bash
+curl -X POST http://localhost:8000/segmentation/from-storage \
+  -H "Content-Type: application/json" \
+  -d '{
+    "song_id": "1013",
+    "algorithms": ["custom_librosa", "foote", "cnmf", "scluster", "fusion"],
+    "params": {
+      "fusion": {
+        "merge_window_seconds": 2.5,
+        "threshold": 0.45,
+        "required_vote_count": 2
+      }
+    }
+  }'
+```
+
+When `fusion` is requested, the backend first dispatches `custom_librosa`, `foote`, `cnmf`, and `scluster`. The result listener dispatches `segmentation.fusion` only after the base outputs are available.
+
+### Batch Evaluation Example
+
+```bash
+curl -X POST http://localhost:8000/evaluation/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "max_tracks": 20,
+    "algorithms": ["custom_librosa", "foote", "cnmf", "scluster", "fusion"],
+    "tolerances": [0.5, 3.0],
+    "concurrency": 3
+  }'
+```
+
+The batch output includes per-track, per-algorithm rows and aggregate comparison lines for `f1_0_5`, `f1_3_0`, precision, recall, and estimated/reference boundary ratios.
 
 ### Viewing Logs
 
@@ -116,7 +153,7 @@ docker-compose down -v
 
 ## Automated Music Segmentation Pipeline
 
-This project implements a classic pipeline for music segmentation. The goal is to identify the structural boundaries within a piece of music (e.g., verse, chorus, bridge).
+This project implements deterministic music structure segmentation. Boundary detection is the primary output. Structural labels such as `A`, `B`, and `C` identify repeated section groups; semantic names such as `Intro`, `Verse`, and `Chorus` are optional heuristic annotations with confidence and reasons.
 
 The process is broken down into the following key steps:
 
@@ -136,13 +173,26 @@ The process is broken down into the following key steps:
     *   **What:** The process of identifying the exact timestamps of the segment boundaries from the novelty curve.
     *   **How:** We find the peaks in the novelty curve. These peaks correspond to the most significant changes in the song's structure and are selected as our segment boundaries.
 
-5.  **Segment Clustering & Labeling (Optional)**
-    *   **What:** After identifying the segments, we can group similar-sounding segments together.
-    *   **How:** By analyzing the features within each segment, we can cluster them. For example, all segments corresponding to the chorus should have similar features and will be grouped into the same cluster, which can then be labeled "Chorus".
+5.  **Segment Clustering & Labeling**
+    *   **What:** After identifying segments, similar segments are grouped into structural labels (`A`, `B`, `C`, ...).
+    *   **How:** The custom Librosa segmenter prefers SSM-based segment similarity; MSAF and fusion outputs use lightweight deterministic segment descriptors when audio is available and stable fallbacks otherwise. These labels mean "similar/repeated section," not human semantic names.
+
+6.  **Conservative Semantic Labels**
+    *   **What:** Optional labels such as `Intro`, `Verse`, `Chorus`, `Bridge`, and `Outro`.
+    *   **How:** Semantic labels are assigned only when simple measurable evidence supports them, such as position, repetition, and relative energy. The system does not label the longest section as Chorus by default.
+
+## Fusion Concepts
+
+There are two separate fusion layers:
+
+- **Feature-level fusion inside `custom_librosa`:** combines SSM novelty, RMS changes, onset flux, chord proxy, beat/phrase candidates, and optional lyrics candidates into one deterministic boundary set.
+- **Algorithm-level fusion (`fusion`):** combines completed outputs from `custom_librosa`, MSAF Foote, MSAF CNMF, and MSAF SCluster using weighted boundary voting. Default weights are `custom_librosa=0.35`, `scluster=0.30`, `cnmf=0.20`, `foote=0.15`.
+
+MSAF algorithms are treated as baseline boundary detectors. Their raw labels are preserved as raw algorithm output when present, but they are not treated as Verse/Chorus semantic labelers by default.
 
 ## Evaluation Metrics
 
-Segmentation quality is measured by comparing predicted boundaries against human-annotated ground truth boundaries (SALAMI dataset) using `mir_eval`.
+Segmentation quality is measured by comparing predicted segment intervals against human-annotated ground truth segment intervals (SALAMI dataset) using `mir_eval.segment.detection(..., trim=True)`.
 
 ### Tolerance
 The time window (in seconds) within which a predicted boundary must fall to be counted as a correct detection. Two standard tolerances are used:
@@ -175,3 +225,12 @@ F1 = 2 × (Precision × Recall) / (Precision + Recall)
 ```
 
 F1 balances both concerns: an algorithm that predicts a boundary every 0.1 seconds achieves perfect recall but near-zero precision, and F1 penalizes this. A good segmentation algorithm needs both.
+
+Evaluation output reports strict and lenient boundary metrics separately:
+
+- `precision_0_5`, `recall_0_5`, `f1_0_5`
+- `precision_3_0`, `recall_3_0`, `f1_3_0`
+- reference/estimated segment and internal-boundary counts
+- over/under-segmentation ratio
+
+Structural labeling metrics are secondary. Semantic section names are tertiary and should only be evaluated against comparable semantic annotations.

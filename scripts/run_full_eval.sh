@@ -11,7 +11,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-CONTAINER="${CONTAINER:-worker-user-code}"
+CONTAINER="${CONTAINER:-worker-dataset}"
 
 docker exec "$CONTAINER" mkdir -p /app/scripts
 docker cp "$DIR/batch_eval.py" "$CONTAINER":/app/scripts/

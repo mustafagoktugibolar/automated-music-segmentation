@@ -4,7 +4,6 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
  * @typedef {{ task_id: string, status: string, worker_type?: string, algorithm?: string, segments?: Array<Record<string, unknown>>, results?: Record<string, unknown>, error?: string }} TaskMessage
  * @typedef {{ file: File, groundTruthCsv?: File | null, title?: string | null, artist?: string | null }} UploadTrackOptions
  * @typedef {{ file: File, algorithms: string[], webhook_url?: string | null, params?: Record<string, unknown> | null }} UploadSegmentationOptions
- * @typedef {{ audioSource: { type: string, value: string }, params?: Record<string, unknown> }} TestAlgorithmOptions
  */
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -40,54 +39,6 @@ function jsonBody(data) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   };
-}
-
-// ── Algorithms ────────────────────────────────────────────────────────────────
-
-export function listAlgorithms() {
-  return apiFetch("/algorithms");
-}
-
-/**
- * @param {string} id
- */
-export function getAlgorithm(id) {
-  return apiFetch(`/algorithms/${id}`);
-}
-
-/**
- * @param {{ name: string, description?: string | null, code: string, params_schema?: Record<string, unknown> | null }} options
- */
-export function saveAlgorithm({ name, description = null, code, params_schema = null }) {
-  return apiFetch("/algorithms", {
-    method: "POST",
-    ...jsonBody({ name, description, code, params_schema }),
-  });
-}
-
-/**
- * @param {string} name
- */
-export function listAlgorithmVersions(name) {
-  return apiFetch(`/algorithms/${encodeURIComponent(name)}/versions`);
-}
-
-/**
- * @param {string} id
- */
-export function deleteAlgorithm(id) {
-  return apiFetch(`/algorithms/${id}`, { method: "DELETE" });
-}
-
-/**
- * @param {string} id
- * @param {TestAlgorithmOptions} options
- */
-export function testAlgorithm(id, { audioSource, params = {} }) {
-  return apiFetch(`/algorithms/${id}/test`, {
-    method: "POST",
-    ...jsonBody({ audio_source: audioSource, params }),
-  });
 }
 
 // ── Datasets ──────────────────────────────────────────────────────────────────
@@ -137,7 +88,7 @@ export function getDatasetTrack(datasetId, trackId) {
  * @param {string} songId
  * @param {string[]} [algorithms]
  */
-export function segmentSongFromStorage(songId, algorithms = ["custom", "foote", "cnmf", "scluster"]) {
+export function segmentSongFromStorage(songId, algorithms = ["custom_librosa", "foote", "cnmf", "scluster"]) {
   return apiFetch("/segmentation/from-storage", {
     method: "POST",
     ...jsonBody({ song_id: songId, algorithms }),
@@ -148,7 +99,7 @@ export function segmentSongFromStorage(songId, algorithms = ["custom", "foote", 
  * @param {string[]} [songIds]
  * @param {string[]} [algorithms]
  */
-export function segmentSongsBatch(songIds = [], algorithms = ["custom", "foote", "cnmf", "scluster"]) {
+export function segmentSongsBatch(songIds = [], algorithms = ["custom_librosa", "foote", "cnmf", "scluster"]) {
   return apiFetch("/songs/segment-batch", {
     method: "POST",
     ...jsonBody({ song_ids: songIds, algorithms }),
@@ -234,23 +185,29 @@ export function getEvaluation(evalId) {
 }
 
 /**
- * @param {{ maxTracks?: number, toleranceSeconds?: number, concurrency?: number, includeLLM?: boolean, llmMode?: string }} options
+ * @param {{ maxTracks?: number, toleranceSeconds?: number, tolerances?: number[], algorithms?: string[], concurrency?: number, includeLLM?: boolean, llmMode?: string, coverageOutlierThreshold?: number }} options
  */
 export function startBatchEval({
   maxTracks = 20,
   toleranceSeconds = 0.5,
+  tolerances = [0.5, 3.0],
+  algorithms = ["custom_librosa", "foote", "cnmf", "scluster", "fusion"],
   concurrency = 3,
   includeLLM = false,
   llmMode = "deterministic",
+  coverageOutlierThreshold = 0.20,
 } = {}) {
   return apiFetch("/evaluation/batch", {
     method: "POST",
     ...jsonBody({
       max_tracks: maxTracks,
       tolerance_seconds: toleranceSeconds,
+      tolerances,
+      algorithms,
       concurrency,
       include_llm: includeLLM,
       llm_mode: llmMode,
+      coverage_outlier_threshold: coverageOutlierThreshold,
     }),
   });
 }
@@ -364,23 +321,48 @@ export async function fetchStatus(taskId) {
  * @param {(data: TaskMessage | Record<string, unknown>) => void} onMessage
  */
 export function subscribeToTask(taskId, onMessage) {
-  const eventSource = new EventSource(`${BACKEND_URL}/segmentation/stream/${taskId}`);
-  
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage(data);
-      if (data.status === "completed" || data.status === "failed") {
-        eventSource.close();
-      }
-    } catch (e) {
-      console.error("Failed to parse SSE message:", e);
+  let terminated = false;
+
+  function terminate() {
+    if (!terminated) {
+      terminated = true;
+      eventSource.close();
     }
+  }
+
+  /** @param {Record<string, unknown>} data */
+  function dispatch(data) {
+    if (terminated) return;
+    onMessage(data);
+    if (data.status === "completed" || data.status === "failed") terminate();
+  }
+
+  // SSE — primary channel
+  const eventSource = new EventSource(`${BACKEND_URL}/segmentation/stream/${taskId}`);
+
+  eventSource.onmessage = (event) => {
+    try { dispatch(JSON.parse(event.data)); }
+    catch (e) { console.error("SSE parse error:", e); }
   };
-  
+
   eventSource.onerror = () => {
     eventSource.close();
   };
-  
-  return () => eventSource.close();
+
+  // Polling — runs in parallel from the start as a silent safety net.
+  // Starts after 2 s to let SSE deliver first in the happy path.
+  (async () => {
+    await new Promise(r => setTimeout(r, 2000));
+    let delay = 3000;
+    while (!terminated) {
+      await new Promise(r => setTimeout(r, delay));
+      if (terminated) break;
+      try {
+        dispatch(await fetchStatus(taskId));
+      } catch { /* backend unreachable — keep retrying */ }
+      delay = Math.min(delay * 1.5, 10000);
+    }
+  })();
+
+  return terminate;
 }

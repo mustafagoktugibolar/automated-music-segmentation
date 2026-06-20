@@ -1,7 +1,6 @@
 <script>
   import { onDestroy } from "svelte";
-  import { uploadSegmentation, fetchStatus, subscribeToTask } from "./lib/api";
-  import AlgorithmStudio from "./components/AlgorithmStudio.svelte";
+  import { uploadSegmentation, subscribeToTask } from "./lib/api";
   import DatasetManager from "./components/DatasetManager.svelte";
   import EvaluationDashboard from "./components/EvaluationDashboard.svelte";
   import BatchEvalDashboard from "./components/BatchEvalDashboard.svelte";
@@ -10,7 +9,6 @@
 
   const NAV_ITEMS = [
     { id: "segmentation", label: "Segmentation" },
-    { id: "studio", label: "Algorithm Studio" },
     { id: "datasets", label: "Datasets" },
     { id: "evaluation", label: "Evaluation" },
     { id: "batch-eval", label: "Batch Eval" },
@@ -28,15 +26,16 @@
   import { Separator } from "src/lib/components/ui/separator";
 
   const ALL_ALGOS = [
-    { id: "custom",   label: "Custom",    hint: "Optimized baseline",          isLLM: false },
+    { id: "custom_librosa", label: "Custom Librosa", hint: "Deterministic feature fusion", isLLM: false },
     { id: "foote",    label: "Foote",     hint: "MSAF algorithm",              isLLM: false },
     { id: "cnmf",     label: "CNMF",      hint: "MSAF algorithm",              isLLM: false },
     { id: "scluster", label: "S-Cluster", hint: "MSAF algorithm",              isLLM: false },
+    { id: "fusion",   label: "Fusion",    hint: "Algorithm-level voting",      isLLM: false },
     { id: "llm",      label: "AI Agent",  hint: "LangChain · LLM calls billed", isLLM: true },
   ];
 
   let file = null;
-  let selected = new Set(["custom"]);
+  let selected = new Set(["custom_librosa"]);
   let llmMode = "deterministic";
 
   // Confirmation modal for LLM
@@ -51,6 +50,9 @@
   let requested = [];
   let results = {};
   let rawStatus = {};
+  let algoStartTimes = {};
+  let algoEndTimes = {};
+  let expandedAlgos = new Set();
 
   let unsubscribe = null;
 
@@ -73,6 +75,9 @@
     requested = [];
     results = {};
     rawStatus = {};
+    algoStartTimes = {};
+    algoEndTimes = {};
+    expandedAlgos = new Set();
     isUploading = false;
   }
 
@@ -120,7 +125,13 @@
     }
     results = {};
     rawStatus = {};
+    algoStartTimes = {};
+    algoEndTimes = {};
     requested = algos;
+
+    const taskStart = Date.now();
+    algos.forEach(a => { algoStartTimes[a] = taskStart; });
+    algoStartTimes = { ...algoStartTimes };
 
     const params = selected.has("llm")
       ? { llm_segmentation: { mode: llmMode } }
@@ -142,7 +153,16 @@
       unsubscribe = subscribeToTask(taskId, /** @param {{status?: string, results?: Record<string, unknown>, error?: string}} data */ (data) => {
         console.log("SSE received data:", data);
         rawStatus = data;
-        results = { ...results, ...(data.results || {}) };
+
+        const arrivalTime = Date.now();
+        const newResults = data.results || {};
+        Object.keys(newResults).forEach(k => {
+          if (!k.includes('__') && !algoEndTimes[k]) {
+            algoEndTimes[k] = arrivalTime;
+          }
+        });
+        algoEndTimes = { ...algoEndTimes };
+        results = { ...results, ...newResults };
 
         if (data.status === "completed" || allRequestedResultsPresent()) {
           console.log("Task completed!");
@@ -223,9 +243,7 @@
   </nav>
 
   <!-- Page router -->
-  {#if currentPage === "studio"}
-    <AlgorithmStudio />
-  {:else if currentPage === "datasets"}
+  {#if currentPage === "datasets"}
     <DatasetManager />
   {:else if currentPage === "evaluation"}
     <EvaluationDashboard />
@@ -233,358 +251,335 @@
     <BatchEvalDashboard />
   {:else}
 
-  <div class="mx-auto max-w-5xl px-4 py-10">
-    <!-- Header -->
-    <header class="mb-8 flex flex-col items-center gap-2">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <h1 class="text-3xl text-center font-semibold tracking-tight">
-            Music Segmentation
-          </h1>
-          <p class="mt-1 text-sm text-zinc-400">
-            Upload an audio file, run multiple algorithms, and inspect results
-            live.
-          </p>
-        </div>
-
+  <div class="mx-auto max-w-screen-2xl px-6 py-8">
+    <!-- Header row -->
+    <header class="mb-6 flex items-center justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Music Segmentation</h1>
+        <p class="mt-0.5 text-sm text-zinc-400">Upload an audio file, run multiple algorithms, compare results side-by-side.</p>
+      </div>
+      <div class="flex items-center gap-3">
         {#if taskId}
           <div class="hidden sm:flex flex-col items-end">
-            <span class="text-xs text-zinc-400">Task ID</span>
-            <span class="font-mono text-xs text-zinc-200">{taskId}</span>
+            <span class="text-[10px] text-zinc-500">Task ID</span>
+            <span class="font-mono text-xs text-zinc-300">{taskId}</span>
+          </div>
+        {/if}
+        {#if statusText}
+          <div class="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+            {#if status === "processing" || status === "uploading"}
+              <span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-white/80"></span>
+            {:else if status === "completed"}
+              <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] text-emerald-300">✓</span>
+            {:else if status === "timeout"}
+              <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/15 text-[11px] text-amber-300">!</span>
+            {:else if status === "error"}
+              <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500/15 text-[11px] text-red-300">×</span>
+            {/if}
+            <span class="text-xs text-zinc-400">Status:</span>
+            <span class="text-xs text-zinc-200">{statusText}</span>
+            <button
+              class="ml-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-40"
+              on:click={resetRunState}
+              disabled={isUploading}
+            >Reset</button>
           </div>
         {/if}
       </div>
-
-      <!-- Status strip -->
-      {#if statusText}
-        <div
-          class="mt-3 flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-900/50 px-4 py-3"
-        >
-          <div class="flex items-center gap-3">
-            {#if status === "processing" || status === "uploading"}
-              <span
-                class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/80"
-              ></span>
-            {:else if status === "completed"}
-              <span
-                class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300"
-                >✓</span
-              >
-            {:else if status === "timeout"}
-              <span
-                class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15 text-amber-300"
-                >!</span
-              >
-            {:else if status === "error"}
-              <span
-                class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-500/15 text-red-300"
-                >×</span
-              >
-            {/if}
-
-            <div class="text-sm text-zinc-200">
-              <span class="text-zinc-400">Status:</span>
-              {statusText}
-            </div>
-          </div>
-
-          <button
-            class="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-700 disabled:opacity-50"
-            on:click={resetRunState}
-            disabled={isUploading}
-          >
-            Reset
-          </button>
-        </div>
-      {/if}
-
-      {#if errorMsg}
-        <div
-          class="mt-3 rounded-2xl border border-red-900/60 bg-red-950/30 px-4 py-3 text-sm text-red-200"
-        >
-          <span class="font-semibold">Error:</span>
-          {errorMsg}
-        </div>
-      {/if}
     </header>
 
-    <!-- Main grid -->
-    <div class="grid gap-6 lg:grid-cols-[360px_1fr]">
-      <!-- Left: Controls -->
-      <section
-        class="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur"
-      >
-        <h2 class="text-sm font-semibold text-zinc-200">Run segmentation</h2>
-        <p class="mt-1 text-sm text-zinc-400">
-          Choose file + algorithms. Results stream in as workers finish.
-        </p>
+    {#if errorMsg}
+      <div class="mb-4 rounded-2xl border border-red-900/60 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+        <span class="font-semibold">Error:</span> {errorMsg}
+      </div>
+    {/if}
+
+    <!-- Main layout: narrow controls sidebar + wide results -->
+    <div class="flex gap-5 items-start">
+
+      <!-- Left sidebar: Controls -->
+      <aside class="w-64 shrink-0 rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5 backdrop-blur sticky top-16">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-400">Run segmentation</h2>
 
         <!-- File -->
-        <div class="mt-6">
-          <label class="text-xs font-medium text-zinc-300" for="audio-file">Audio file</label>
-          <div class="mt-2 rounded-2xl border border-zinc-800 bg-zinc-950 p-3">
+        <div class="mt-4">
+          <label class="text-[11px] font-medium text-zinc-400" for="audio-file">Audio file</label>
+          <div class="mt-1.5 rounded-xl border border-zinc-800 bg-zinc-950 p-2.5">
             <input
               id="audio-file"
-              class="block w-full cursor-pointer text-sm text-zinc-200 file:mr-4 file:rounded-xl file:border-0 file:bg-zinc-800 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-zinc-100 hover:file:bg-zinc-700"
+              class="block w-full cursor-pointer text-xs text-zinc-200 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
               type="file"
               accept=".mp3,.wav,.flac,.ogg,.m4a"
               on:change={(e) => (file = e.currentTarget.files?.[0] ?? null)}
             />
             {#if file}
-              <div
-                class="mt-3 flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2"
-              >
+              <div class="mt-2 flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5">
                 <div class="min-w-0">
-                  <div class="truncate text-xs font-medium text-zinc-200">
-                    {file.name}
-                  </div>
-                  <div class="text-[11px] text-zinc-400">
-                    {prettyBytes(file.size)}
-                  </div>
+                  <div class="truncate text-[11px] font-medium text-zinc-200">{file.name}</div>
+                  <div class="text-[10px] text-zinc-500">{prettyBytes(file.size)}</div>
                 </div>
                 <button
-                  class="shrink-0 rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-700"
-                  on:click={() => (file = null)}
-                  type="button"
-                >
-                  Clear
-                </button>
+                  class="shrink-0 rounded-md border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-700"
+                  on:click={() => (file = null)} type="button"
+                >Clear</button>
               </div>
             {:else}
-              <p class="mt-2 text-[11px] text-zinc-500">
-                Supported: mp3, wav, flac, ogg, m4a
-              </p>
+              <p class="mt-1.5 text-[10px] text-zinc-600">mp3 · wav · flac · ogg · m4a</p>
             {/if}
           </div>
         </div>
 
         <!-- Algorithms -->
-        <div class="mt-6">
-          <p class="text-xs font-medium text-zinc-300">Algorithms</p>
-
-          <div class="mt-3 grid gap-2">
+        <div class="mt-4">
+          <p class="text-[11px] font-medium text-zinc-400">Algorithms</p>
+          <div class="mt-2 space-y-1">
             {#each ALL_ALGOS as a}
               <button
                 type="button"
-                class="group flex w-full items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-left hover:border-zinc-700"
+                class="group flex w-full items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-left hover:border-zinc-700"
                 on:click={() => toggleAlgo(a.id)}
               >
-                <div class="flex items-center gap-3">
-                  <div
-                    class={"h-4 w-4 rounded border " +
-                      (selected.has(a.id)
-                        ? "border-indigo-400 bg-indigo-400/30"
-                        : "border-zinc-700 bg-transparent")}
-                  ></div>
+                <div class="flex items-center gap-2.5">
+                  <div class={"h-3.5 w-3.5 rounded border shrink-0 " + (selected.has(a.id) ? "border-indigo-400 bg-indigo-400/30" : "border-zinc-700 bg-transparent")}></div>
                   <div>
-                    <div class="text-sm font-medium text-zinc-200">
-                      {a.label}
-                    </div>
-                    <div class="text-[11px] text-zinc-500">{a.hint}</div>
+                    <div class="text-xs font-medium text-zinc-200">{a.label}</div>
+                    <div class="text-[10px] text-zinc-600">{a.hint}</div>
                   </div>
                 </div>
-
-                <!-- Chip -->
                 {#if requested.length > 0}
                   {#if algoChipState(a.id) === "done"}
-                    <span
-                      class="rounded-full bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300"
-                      >Done</span
-                    >
+                    <span class="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">Done</span>
                   {:else if algoChipState(a.id) === "pending"}
-                    <span
-                      class="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300"
-                      >Pending</span
-                    >
-                  {:else}
-                    <span
-                      class="rounded-full bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
-                      >—</span
-                    >
+                    <span class="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">…</span>
                   {/if}
                 {/if}
               </button>
             {/each}
           </div>
 
-          <div class="mt-3 text-[11px] text-zinc-500">
-            Selected: {Array.from(selected).join(", ") || "none"}
-          </div>
-
-            {#if selected.has("llm")}
-              <div class="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3">
-                <label class="text-xs font-medium text-zinc-300" for="llm-mode">AI Agent mode</label>
-                <select
-                  id="llm-mode"
-                  class="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
-                  bind:value={llmMode}
-                >
-                  <option value="deterministic">Deterministic</option>
-                  <option value="ai_generated">AI generated</option>
-                </select>
-                <p class="mt-2 text-[11px] text-zinc-500">
-                  Deterministic keeps the existing pipeline. AI generated lets the LLM choose which candidate source families to run.
-                </p>
-              </div>
-            {/if}
+          {#if selected.has("llm")}
+            <div class="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5">
+              <label class="text-[11px] font-medium text-zinc-400" for="llm-mode">AI Agent mode</label>
+              <select
+                id="llm-mode"
+                class="mt-1.5 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                bind:value={llmMode}
+              >
+                <option value="deterministic">Deterministic</option>
+                <option value="ai_generated">AI generated</option>
+              </select>
+            </div>
+          {/if}
         </div>
 
-        <!-- Actions -->
-        <div class="mt-6 grid gap-2">
+        <!-- Start button -->
+        <div class="mt-4">
           <button
-            class="inline-flex items-center justify-center rounded-2xl bg-indigo-500 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-zinc-700"
+            class="w-full inline-flex items-center justify-center rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-zinc-700"
             on:click={handleStartClick}
             disabled={isUploading || status === "processing"}
           >
             {#if isUploading}
-              <span
-                class="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/80"
-              ></span>
+              <span class="mr-2 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-white/80"></span>
               Uploading…
             {:else if status === "processing"}
-              <span
-                class="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/80"
-              ></span>
+              <span class="mr-2 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-white/80"></span>
               Processing…
             {:else}
               Start segmentation
             {/if}
           </button>
-
-          <p class="text-[11px] text-zinc-500">
-            Tip: use a shorter audio sample while testing so you can verify
-            results quickly.
-          </p>
+          <p class="mt-2 text-[10px] text-zinc-600 leading-snug">Shorter clips give faster feedback while testing.</p>
         </div>
-      </section>
+      </aside>
 
-      <!-- Right: Results -->
-      <section
-        class="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur"
-      >
-        <div class="flex items-center justify-between">
+      <!-- Right: Results — full width, stacked rows -->
+      <section class="flex-1 min-w-0 rounded-3xl border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur">
+        <div class="flex items-center justify-between mb-5">
           <div>
             <h2 class="text-sm font-semibold text-zinc-200">Results</h2>
-            <p class="mt-1 text-sm text-zinc-400">
-              JSON output per algorithm. Expand and inspect.
-            </p>
+            <p class="mt-0.5 text-xs text-zinc-500">All timelines share the same scale — compare boundaries directly.</p>
           </div>
-
-          <div class="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
-            <span class="rounded-full bg-zinc-800 px-2 py-1">SSE</span>
-          </div>
+          <span class="rounded-full bg-zinc-800 px-2 py-1 text-xs text-zinc-400">SSE</span>
         </div>
 
         {#if Object.keys(results).length === 0}
-          <div
-            class="mt-6 rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/40 p-10 text-center"
-          >
-            <div
-              class="mx-auto mb-3 h-10 w-10 rounded-2xl border border-zinc-800 bg-zinc-900/60"
-            ></div>
+          <div class="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/40 p-16 text-center">
+            <div class="mx-auto mb-3 h-10 w-10 rounded-2xl border border-zinc-800 bg-zinc-900/60"></div>
             <div class="text-sm font-medium text-zinc-200">No results yet</div>
-            <div class="mt-1 text-sm text-zinc-500">
-              Run segmentation to see outputs stream in.
-            </div>
+            <div class="mt-1 text-xs text-zinc-500">Run segmentation to see outputs stream in.</div>
           </div>
         {:else}
-          <div class="mt-6 grid gap-4 lg:grid-cols-2">
-            {#each Object.keys(results).filter(k => !k.endsWith("__explanation") && !k.endsWith("__evaluation")) as algo}
-              {#if algo === "llm"}
-                <!-- ── AI Agent rich result card ── -->
-                <div class="self-start rounded-2xl border border-indigo-800/50 bg-zinc-950 lg:col-span-2">
-                  <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-indigo-800/30">
-                    <div class="flex items-center gap-3">
-                      <div class="h-2 w-2 rounded-full bg-indigo-400"></div>
-                      <div class="text-sm font-semibold text-zinc-200">AI Agent</div>
-                      <span class="rounded-full border border-indigo-800/60 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-300">LLM</span>
-                      <span class="text-xs text-zinc-500">{(results[algo] || []).length} segments</span>
+          {@const allAlgos = Object.keys(results).filter(k => !k.includes('__'))}
+          {@const globalMaxDur = Math.max(...allAlgos.map(a => { const s = results[a] || []; return s.length ? Math.max(...s.map(x => x.end)) : 0; }), 1)}
+          {@const palette = ['#6366f1','#10b981','#f59e0b','#ec4899','#06b6d4','#f97316','#8b5cf6','#14b8a6']}
+
+          <!-- Shared time axis -->
+          <div class="mb-3 flex items-center gap-0" style="padding-left: 220px;">
+            <div class="flex-1 flex justify-between text-[10px] text-zinc-600 font-mono tabular-nums">
+              <span>0:00</span>
+              <span>{String(Math.floor(globalMaxDur/4/60)).padStart(2,'0')}:{String(Math.floor(globalMaxDur/4%60)).padStart(2,'0')}</span>
+              <span>{String(Math.floor(globalMaxDur/2/60)).padStart(2,'0')}:{String(Math.floor(globalMaxDur/2%60)).padStart(2,'0')}</span>
+              <span>{String(Math.floor(globalMaxDur*3/4/60)).padStart(2,'0')}:{String(Math.floor(globalMaxDur*3/4%60)).padStart(2,'0')}</span>
+              <span>{String(Math.floor(globalMaxDur/60)).padStart(2,'0')}:{String(Math.floor(globalMaxDur%60)).padStart(2,'0')}</span>
+            </div>
+          </div>
+
+          <!-- Algorithm rows -->
+          <div class="space-y-2">
+            {#each allAlgos as algo}
+              {@const isLlm = algo === 'llm'}
+              {@const segs = results[algo] || []}
+              {@const uniqueLabels = [...new Set(segs.map(s => s.label))]}
+              {@const colorMap = Object.fromEntries(uniqueLabels.map((l, i) => [l, palette[i % palette.length]]))}
+
+              <div class={"rounded-2xl border " + (isLlm ? "border-indigo-800/50 bg-zinc-950" : "border-zinc-800 bg-zinc-950")}>
+                <!-- Row: label col + timeline bar -->
+                <button
+                  type="button"
+                  class={"w-full flex items-center gap-0 px-4 py-3 cursor-pointer rounded-2xl transition-colors " + (isLlm ? "hover:bg-indigo-500/5" : "hover:bg-zinc-900/60") + (expandedAlgos.has(algo) ? " rounded-b-none border-b " + (isLlm ? "border-indigo-800/30" : "border-zinc-800/60") : "")}
+                  on:click={() => { const next = new Set(expandedAlgos); next.has(algo) ? next.delete(algo) : next.add(algo); expandedAlgos = next; }}
+                >
+                  <!-- Label column: fixed 220px -->
+                  <div class="w-[220px] shrink-0 flex items-center gap-3 pr-4">
+                    <div class={"h-2 w-2 rounded-full shrink-0 " + (isLlm ? "bg-indigo-400" : "bg-indigo-400/70")}></div>
+                    <div class="min-w-0 text-left">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-semibold text-zinc-200">{isLlm ? 'AI Agent' : algo.toUpperCase()}</span>
+                        {#if isLlm}<span class="rounded-full border border-indigo-800/60 bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-medium text-indigo-300">LLM</span>{/if}
+                      </div>
+                      <div class="flex items-center gap-2 mt-0.5">
+                        <span class="text-[11px] text-zinc-500">{segs.length} segs</span>
+                        {#if algoEndTimes[algo] && algoStartTimes[algo]}
+                          <span class="font-mono text-[11px] text-zinc-600 tabular-nums">{((algoEndTimes[algo] - algoStartTimes[algo]) / 1000).toFixed(1)}s</span>
+                        {/if}
+                        {#if isLlm && results["llm__evaluation"]?.boundary_f_measure != null}
+                          <span class="text-[11px] font-semibold tabular-nums {results['llm__evaluation'].boundary_f_measure >= 0.7 ? 'text-emerald-400' : results['llm__evaluation'].boundary_f_measure >= 0.5 ? 'text-amber-400' : 'text-red-400'}">
+                            F1 {(results["llm__evaluation"].boundary_f_measure * 100).toFixed(1)}%
+                          </span>
+                        {/if}
+                      </div>
                     </div>
-                    {#if results["llm__evaluation"]?.boundary_f_measure != null}
-                      <span class="text-xs font-semibold tabular-nums
-                        {results['llm__evaluation'].boundary_f_measure >= 0.7 ? 'text-emerald-400' :
-                         results['llm__evaluation'].boundary_f_measure >= 0.5 ? 'text-amber-400' : 'text-red-400'}">
-                        F1 {(results["llm__evaluation"].boundary_f_measure * 100).toFixed(1)}%
-                      </span>
-                    {/if}
                   </div>
 
-                  {#if results["llm__explanation"]}
-                    <div class="px-4 py-3 border-b border-zinc-800/60 bg-indigo-500/5">
+                  <!-- Timeline bar: flex-1 -->
+                  <div class="flex-1 min-w-0">
+                    <div class="relative h-10 rounded-xl overflow-hidden bg-zinc-900/80 w-full">
+                      {#each segs as seg}
+                        {@const left = (seg.start / globalMaxDur) * 100}
+                        {@const width = Math.max((seg.end - seg.start) / globalMaxDur * 100, 0.2)}
+                        <div
+                          class="absolute inset-y-0 flex items-center justify-center overflow-hidden"
+                          style="left: {left}%; width: {width}%; background-color: {colorMap[seg.label]}40; border-right: 1px solid {colorMap[seg.label]}55;"
+                          title="{seg.label}: {seg.start.toFixed(1)}s – {seg.end.toFixed(1)}s"
+                        >
+                          {#if width > 4}
+                            <span class="px-1 text-[10px] font-bold truncate" style="color: {colorMap[seg.label]}">{seg.label}</span>
+                          {/if}
+                        </div>
+                      {/each}
+                      <!-- Boundary lines -->
+                      {#each segs as seg, i}
+                        {#if i > 0}
+                          <div class="absolute inset-y-0 w-px bg-white/20 z-20 pointer-events-none" style="left: {(seg.start / globalMaxDur) * 100}%"></div>
+                        {/if}
+                      {/each}
+                    </div>
+                  </div>
+
+                  <!-- Chevron -->
+                  <div class="ml-3 shrink-0">
+                    <svg class="h-3.5 w-3.5 text-zinc-600 transition-transform {expandedAlgos.has(algo) ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                  </div>
+                </button>
+
+                <!-- Boundary timestamps row — mirrors button's internal structure -->
+                <div class="flex items-start gap-0 px-4 pb-1.5">
+                  <div class="w-[220px] shrink-0"></div>
+                  <div class="flex-1 min-w-0 relative h-4">
+                    {#each segs as seg, i}
+                      {#if i > 0}
+                        {@const pct = (seg.start / globalMaxDur) * 100}
+                        <div class="absolute top-0 flex flex-col items-center" style="left: {pct}%; transform: translateX(-50%)">
+                          <div class="h-1.5 w-px bg-zinc-700/70"></div>
+                          <span class="text-[8px] font-mono tabular-nums text-zinc-600 leading-none whitespace-nowrap">{String(Math.floor(seg.start/60)).padStart(2,'0')}:{String(Math.floor(seg.start%60)).padStart(2,'0')}</span>
+                        </div>
+                      {/if}
+                    {/each}
+                  </div>
+                  <div class="ml-3 w-3.5 shrink-0"></div>
+                </div>
+
+                <!-- Expanded detail rows -->
+                {#if expandedAlgos.has(algo)}
+                  {#if isLlm && results["llm__explanation"]}
+                    <div class="px-4 py-3 border-b border-zinc-800/40 bg-indigo-500/5">
                       <p class="text-[10px] font-semibold uppercase tracking-widest text-indigo-400 mb-1">Agent Explanation</p>
                       <p class="text-sm text-zinc-300 leading-relaxed">{results["llm__explanation"]}</p>
                     </div>
                   {/if}
-
-                  <div class="px-4 py-3 space-y-2">
-                    {#each (results[algo] || []) as seg, i}
-                      <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2.5">
-                        <div class="flex items-center justify-between gap-2">
-                          <div class="flex items-center gap-2">
-                            <span class="font-mono text-xs text-zinc-500">
-                              {String(Math.floor(seg.start / 60)).padStart(2,"0")}:{String(Math.floor(seg.start % 60)).padStart(2,"0")}
-                              –
-                              {String(Math.floor(seg.end / 60)).padStart(2,"0")}:{String(Math.floor(seg.end % 60)).padStart(2,"0")}
+                  <div class="px-4 pb-4 pt-2 space-y-1">
+                    {#each segs as seg}
+                      <div class={"rounded-xl border px-3 py-2.5 hover:bg-zinc-900/60 transition-colors " + (isLlm ? "border-indigo-800/20 bg-zinc-900/30" : "border-zinc-800/60 bg-zinc-900/30")}>
+                        <div class="flex items-center gap-2">
+                          <div class="h-2 w-2 shrink-0 rounded-sm" style="background-color: {colorMap[seg.label]}"></div>
+                          <span class="font-mono text-[11px] text-zinc-500 w-28 shrink-0 tabular-nums">
+                            {String(Math.floor(seg.start/60)).padStart(2,'0')}:{String(Math.floor(seg.start%60)).padStart(2,'0')}
+                            –
+                            {String(Math.floor(seg.end/60)).padStart(2,'0')}:{String(Math.floor(seg.end%60)).padStart(2,'0')}
+                          </span>
+                          <span class="text-xs font-bold" style="color: {colorMap[seg.label]}">{seg.label}</span>
+                          {#if seg.structural_label && seg.structural_label !== seg.label}
+                            <span class="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400">{seg.structural_label}</span>
+                          {/if}
+                          {#if seg.section_type}
+                            <span class="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{seg.section_type}</span>
+                          {/if}
+                          {#if seg.confidence != null}
+                            <span class="ml-auto text-[10px] tabular-nums font-mono shrink-0 {seg.confidence >= 0.7 ? 'text-emerald-400' : seg.confidence >= 0.5 ? 'text-amber-400' : 'text-zinc-500'}">
+                              {(seg.confidence * 100).toFixed(0)}%
                             </span>
-                            <span class="rounded-full bg-indigo-500/15 px-2 py-0.5 text-xs font-semibold text-indigo-300">{seg.label}</span>
-                          </div>
-                          <div class="flex items-center gap-2">
-                            {#if seg.source_features?.length}
-                              <span class="text-[10px] text-zinc-600">{seg.source_features.join(", ")}</span>
-                            {/if}
-                            {#if seg.confidence != null}
-                              <span class="text-[10px] font-medium tabular-nums
-                                {seg.confidence >= 0.7 ? 'text-emerald-500' : seg.confidence >= 0.5 ? 'text-amber-500' : 'text-zinc-500'}">
-                                {(seg.confidence * 100).toFixed(0)}%
+                          {/if}
+                        </div>
+                        {#if seg.semantic_label || seg.semantic_reason || seg.reason}
+                          <div class="mt-1.5 flex items-start gap-2 pl-4">
+                            {#if seg.semantic_label}
+                              <span class="shrink-0 rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-300 border border-indigo-500/20">
+                                {seg.semantic_label}{seg.semantic_confidence != null ? ` · ${(seg.semantic_confidence * 100).toFixed(0)}%` : ''}
                               </span>
                             {/if}
+                            <span class="text-[11px] text-zinc-500 leading-snug">{seg.semantic_reason || seg.reason || ''}</span>
                           </div>
-                        </div>
-                        {#if seg.reason}
-                          <p class="mt-1 text-[11px] text-zinc-500 leading-snug">{seg.reason}</p>
+                        {/if}
+                        {#if seg.source_features?.length || seg.label_method || seg.label_confidence != null}
+                          <div class="mt-1.5 flex flex-wrap items-center gap-1.5 pl-4">
+                            {#each seg.source_features || [] as feat}
+                              <span class="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500">{feat}</span>
+                            {/each}
+                            {#if seg.label_method}<span class="ml-auto text-[10px] text-zinc-600 font-mono">{seg.label_method}</span>{/if}
+                            {#if seg.label_confidence != null}<span class="text-[10px] text-zinc-600 tabular-nums">lconf {(seg.label_confidence * 100).toFixed(0)}%</span>{/if}
+                          </div>
                         {/if}
                       </div>
                     {/each}
                   </div>
-                </div>
-              {:else}
-                <!-- ── Standard algorithm result card ── -->
-                <details class="group self-start rounded-2xl border border-zinc-800 bg-zinc-950">
-                  <summary class="flex self-start cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                    <div class="flex items-center gap-3">
-                      <div class="h-2 w-2 rounded-full bg-indigo-400/80"></div>
-                      <div class="text-sm font-semibold text-zinc-200">{algo.toUpperCase()}</div>
-                    </div>
-                    <div class="text-xs text-zinc-500 group-open:hidden">Click to expand</div>
-                    <div class="text-xs text-zinc-500 hidden group-open:block">Click to collapse</div>
-                  </summary>
-                  <div class="border-t border-zinc-800 px-4 py-4">
-                    <pre class="max-h-[420px] overflow-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-xs text-zinc-200">{JSON.stringify(results[algo], null, 2)}</pre>
-                  </div>
-                </details>
-              {/if}
+                {/if}
+              </div>
             {/each}
           </div>
         {/if}
 
         <!-- Debug payload -->
         {#if Object.keys(rawStatus).length > 0}
-          <details
-            class="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4"
-          >
-            <summary class="cursor-pointer text-sm font-medium text-zinc-200"
-              >Debug: last status payload</summary
-            >
-            <pre
-              class="mt-3 overflow-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-xs text-zinc-200">
-{JSON.stringify(rawStatus, null, 2)}
-            </pre>
+          <details class="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+            <summary class="cursor-pointer text-xs font-medium text-zinc-400">▶ Debug: last status payload</summary>
+            <pre class="mt-3 overflow-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-xs text-zinc-200">{JSON.stringify(rawStatus, null, 2)}</pre>
           </details>
         {/if}
       </section>
     </div>
 
-    <footer class="mt-10 text-center text-xs text-zinc-500">
+    <footer class="mt-8 text-center text-xs text-zinc-600">
       Built with Svelte + Tailwind.
     </footer>
   </div>
