@@ -32,14 +32,32 @@
     { id: "llm",      name: "AI Agent (LLM)",        isLLM: true  },
   ];
 
+  const BASELINE_ALGOS = ["custom_librosa", "foote", "cnmf", "scluster"];
+
   // Confirmation modal for LLM in evaluation
   let showLLMEvalConfirm = false;
   let llmMode = "deterministic";
 
   let toleranceSeconds = 3;
 
+  // Progressive display during processing
+  let intermediateSegments = {};   // algo -> segments[]
+  let algoProcessingTimes  = {};   // algo -> seconds
+
+  $: expectedAlgosDuringRun = (() => {
+    const ids = Array.from(selectedAlgoIds);
+    if (ids.includes("fusion")) {
+      const all = [...ids];
+      BASELINE_ALGOS.forEach(a => { if (!all.includes(a)) all.push(a); });
+      return all;
+    }
+    return ids;
+  })();
+
   let isRunning = false;
   let runError = "";
+  let compareError = "";
+  let lastCompletedTasks = null;  // kept for retry
   let comparisonResults = null;  // { algo_name: { metrics: {...} } }
 
   let pastEvals = {};   // { algo_name: [ {...} ] }
@@ -111,7 +129,10 @@
 
     isRunning = true;
     runError = "";
+    compareError = "";
     comparisonResults = null;
+    intermediateSegments = {};
+    algoProcessingTimes  = {};
 
     try {
       if (!selectedTrack.audio_url && !selectedTrack.song_id) {
@@ -150,8 +171,20 @@
       }
 
       // Wait for the unified task to reach a terminal state via SSE.
+      // Populate intermediateSegments as each algorithm finishes.
       await new Promise((resolve) => {
         const unsub = subscribeToTask(unifiedTaskId, (data) => {
+          if (data.results) {
+            const partial = {};
+            const times   = {};
+            for (const [k, v] of Object.entries(data.results)) {
+              if (!k.includes("__") && Array.isArray(v)) partial[k] = v;
+              if (k.endsWith("__processing_time") && typeof v === "number")
+                times[k.replace("__processing_time", "")] = v;
+            }
+            if (Object.keys(partial).length) intermediateSegments = { ...intermediateSegments, ...partial };
+            if (Object.keys(times).length)   algoProcessingTimes  = { ...algoProcessingTimes,  ...times  };
+          }
           if (data.status === "completed" || data.status === "failed") {
             unsub();
             resolve();
@@ -159,15 +192,10 @@
         });
       });
 
-      // Run evaluation comparison
-      const res = await compareAlgorithms({
-        trackId: selectedTrack.track_id,
-        algorithmNames: Array.from(selectedAlgoIds),
-        taskIds: completedTasks,
-        toleranceSeconds,
-      });
+      lastCompletedTasks = completedTasks;
 
-      comparisonResults = res.comparison;
+      // Run evaluation comparison
+      await runCompare(completedTasks);
 
       // Refresh past evals
       const evRes = await getEvaluationsForTrack(selectedTrack.track_id);
@@ -178,8 +206,28 @@
 
     } catch (e) {
       runError = e.message;
+      console.error("[EvalDashboard] runComparison failed:", e);
     } finally {
       isRunning = false;
+    }
+  }
+
+  async function runCompare(taskIds = lastCompletedTasks) {
+    if (!taskIds || !selectedTrack) return;
+    compareError = "";
+    try {
+      const res = await compareAlgorithms({
+        trackId: selectedTrack.track_id,
+        algorithmNames: Array.from(selectedAlgoIds),
+        taskIds,
+        toleranceSeconds,
+      });
+      console.log("[EvalDashboard] compareAlgorithms response:", res);
+      comparisonResults = res?.comparison ?? null;
+      if (!comparisonResults) compareError = "Server returned no comparison data.";
+    } catch (e) {
+      compareError = e.message;
+      console.error("[EvalDashboard] compareAlgorithms failed:", e);
     }
   }
 
@@ -971,6 +1019,118 @@
           {/if}
         </div>
       </div>
+
+      <!-- Live segmentation preview (during processing / before metrics ready) -->
+      {#if isRunning || (Object.keys(intermediateSegments).length > 0 && !comparisonResults) || compareError}
+        {@const liveMaxDur = Math.max(
+          ...expectedAlgosDuringRun.map(a => { const s = intermediateSegments[a] || []; return s.length ? Math.max(...s.map(x => x.end)) : 0; }),
+          ...(selectedTrack?.ground_truth?.length ? [Math.max(...selectedTrack.ground_truth.map(x => x.end))] : []),
+          1
+        )}
+        {@const palette = ['#6366f1','#10b981','#f59e0b','#ec4899','#06b6d4','#f97316','#8b5cf6','#14b8a6']}
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+          <div class="px-5 py-3 border-b border-zinc-800 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              {#if isRunning}
+                <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-indigo-400 shrink-0"></span>
+              {/if}
+              <h3 class="text-sm font-semibold text-zinc-200">
+                {#if compareError}Metrics failed{:else if isRunning}Segmenting…{:else}Computing metrics…{/if}
+              </h3>
+            </div>
+            {#if compareError}
+              <button
+                on:click={() => runCompare()}
+                class="rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
+              >Retry metrics</button>
+            {/if}
+          </div>
+          {#if compareError}
+            <div class="px-5 py-3 border-b border-red-900/30 bg-red-950/20 text-xs text-red-300 font-mono break-all">
+              {compareError}
+            </div>
+          {/if}
+          <div class="px-5 py-4 space-y-2">
+            <!-- Ground truth mini row -->
+            <div class="flex items-center gap-0">
+              <div class="w-[220px] shrink-0 flex items-center justify-end pr-4">
+                <span class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">Ground Truth</span>
+              </div>
+              <div class="flex-1 h-10 rounded-xl overflow-hidden bg-zinc-900/80 relative">
+                {#each (selectedTrack?.ground_truth || []) as seg}
+                  {@const left = (seg.start / liveMaxDur) * 100}
+                  {@const w    = Math.max((seg.end - seg.start) / liveMaxDur * 100, 0.2)}
+                  <div class="absolute inset-y-0 flex items-center justify-center overflow-hidden"
+                       style="left:{left}%;width:{w}%;background:#4f46e540;border-right:1px solid #4f46e555;"
+                       title="{seg.label}: {seg.start?.toFixed(1)}–{seg.end?.toFixed(1)}s">
+                    {#if w > 4}<span class="px-1 text-[10px] font-bold truncate text-indigo-300">{seg.label}</span>{/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- One row per expected algo -->
+            {#each expectedAlgosDuringRun as algo}
+              {@const segs         = intermediateSegments[algo] || []}
+              {@const done         = segs.length > 0}
+              {@const pTime        = algoProcessingTimes[algo]}
+              {@const uniqueLabels = [...new Set(segs.map(s => s.label || s.section_type || ''))]}
+              {@const colorMap     = Object.fromEntries(uniqueLabels.map((l, i) => [l, palette[i % palette.length]]))}
+
+              <div class="flex items-center gap-0">
+                <!-- Label col: 220px fixed -->
+                <div class="w-[220px] shrink-0 flex items-center gap-3 pr-4 justify-end">
+                  <div class="text-right min-w-0">
+                    <div class="text-sm font-semibold {done ? 'text-zinc-200' : 'text-zinc-500'}">{algo.toUpperCase()}</div>
+                    <div class="text-[11px] mt-0.5">
+                      {#if done && pTime != null}
+                        <span class="font-mono text-zinc-500 tabular-nums">{segs.length} segs · {pTime.toFixed(1)}s</span>
+                      {:else if done}
+                        <span class="text-zinc-500">{segs.length} segs</span>
+                      {:else if isRunning}
+                        <span class="text-zinc-600 italic">waiting…</span>
+                      {/if}
+                    </div>
+                  </div>
+                  {#if done}
+                    <span class="shrink-0 inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] text-emerald-300">✓</span>
+                  {:else if isRunning}
+                    <span class="shrink-0 h-4 w-4"></span>
+                  {/if}
+                </div>
+
+                <!-- Timeline bar -->
+                <div class="flex-1 h-10 rounded-xl overflow-hidden bg-zinc-900/80 relative">
+                  {#if !done && isRunning}
+                    <div class="absolute inset-0 flex items-center justify-center gap-2">
+                      <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400"></span>
+                      <span class="text-[10px] text-zinc-600">processing</span>
+                    </div>
+                  {:else}
+                    {#each segs as seg}
+                      {@const label = seg.label || seg.section_type || ''}
+                      {@const color = colorMap[label] || '#6366f1'}
+                      {@const left  = (seg.start / liveMaxDur) * 100}
+                      {@const w     = Math.max((seg.end - seg.start) / liveMaxDur * 100, 0.2)}
+                      <div class="absolute inset-y-0 flex items-center justify-center overflow-hidden"
+                           style="left:{left}%;width:{w}%;background-color:{color}40;border-right:1px solid {color}55;"
+                           title="{label}: {seg.start?.toFixed(1)}s – {seg.end?.toFixed(1)}s">
+                        {#if w > 4}<span class="px-1 text-[10px] font-bold truncate" style="color:{color}">{label}</span>{/if}
+                      </div>
+                    {/each}
+                    <!-- boundary ticks -->
+                    {#each segs as seg, i}
+                      {#if i > 0}
+                        <div class="absolute inset-y-0 w-px bg-white/20 z-10 pointer-events-none" style="left:{(seg.start / liveMaxDur) * 100}%"></div>
+                      {/if}
+                    {/each}
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <!-- Current comparison results -->
       {#if comparisonResults}

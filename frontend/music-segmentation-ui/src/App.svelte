@@ -34,6 +34,8 @@
     { id: "llm",      label: "AI Agent",  hint: "LangChain · LLM calls billed", isLLM: true },
   ];
 
+  const BASELINE_ALGOS = ["custom_librosa", "foote", "cnmf", "scluster"];
+
   let file = null;
   let selected = new Set(["custom_librosa"]);
   let llmMode = "deterministic";
@@ -89,11 +91,22 @@
   }
 
   function algoChipState(algoId) {
-    if (!requested.includes(algoId)) return "neutral";
+    const isFusionSub = requested.includes("fusion") && BASELINE_ALGOS.includes(algoId);
+    if (!requested.includes(algoId) && !isFusionSub) return "neutral";
     if (results?.[algoId]) return "done";
     if (status === "processing" || status === "uploading") return "pending";
     return "neutral";
   }
+
+  $: allExpectedAlgos = (() => {
+    if (requested.length === 0) return Object.keys(results).filter(k => !k.includes("__"));
+    let exp = [...requested];
+    if (requested.includes("fusion")) {
+      BASELINE_ALGOS.forEach(a => { if (!exp.includes(a)) exp.push(a); });
+    }
+    Object.keys(results).filter(k => !k.includes("__") && !exp.includes(k)).forEach(k => exp.push(k));
+    return exp;
+  })();
 
   function handleStartClick() {
     if (selected.has("llm") && !showLLMConfirm) {
@@ -131,6 +144,9 @@
 
     const taskStart = Date.now();
     algos.forEach(a => { algoStartTimes[a] = taskStart; });
+    if (algos.includes("fusion")) {
+      BASELINE_ALGOS.forEach(a => { algoStartTimes[a] = taskStart; });
+    }
     algoStartTimes = { ...algoStartTimes };
 
     const params = selected.has("llm")
@@ -403,15 +419,14 @@
           <span class="rounded-full bg-zinc-800 px-2 py-1 text-xs text-zinc-400">SSE</span>
         </div>
 
-        {#if Object.keys(results).length === 0}
+        {#if allExpectedAlgos.length === 0}
           <div class="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/40 p-16 text-center">
             <div class="mx-auto mb-3 h-10 w-10 rounded-2xl border border-zinc-800 bg-zinc-900/60"></div>
             <div class="text-sm font-medium text-zinc-200">No results yet</div>
             <div class="mt-1 text-xs text-zinc-500">Run segmentation to see outputs stream in.</div>
           </div>
         {:else}
-          {@const allAlgos = Object.keys(results).filter(k => !k.includes('__'))}
-          {@const globalMaxDur = Math.max(...allAlgos.map(a => { const s = results[a] || []; return s.length ? Math.max(...s.map(x => x.end)) : 0; }), 1)}
+          {@const globalMaxDur = Math.max(...allExpectedAlgos.map(a => { const s = results[a] || []; return s.length ? Math.max(...s.map(x => x.end)) : 0; }), 1)}
           {@const palette = ['#6366f1','#10b981','#f59e0b','#ec4899','#06b6d4','#f97316','#8b5cf6','#14b8a6']}
 
           <!-- Shared time axis -->
@@ -427,9 +442,11 @@
 
           <!-- Algorithm rows -->
           <div class="space-y-2">
-            {#each allAlgos as algo}
+            {#each allExpectedAlgos as algo}
               {@const isLlm = algo === 'llm'}
               {@const segs = results[algo] || []}
+              {@const isPending = segs.length === 0 && (status === "processing" || status === "uploading")}
+              {@const workerTime = results[algo + '__processing_time']}
               {@const uniqueLabels = [...new Set(segs.map(s => s.label))]}
               {@const colorMap = Object.fromEntries(uniqueLabels.map((l, i) => [l, palette[i % palette.length]]))}
 
@@ -437,8 +454,9 @@
                 <!-- Row: label col + timeline bar -->
                 <button
                   type="button"
-                  class={"w-full flex items-center gap-0 px-4 py-3 cursor-pointer rounded-2xl transition-colors " + (isLlm ? "hover:bg-indigo-500/5" : "hover:bg-zinc-900/60") + (expandedAlgos.has(algo) ? " rounded-b-none border-b " + (isLlm ? "border-indigo-800/30" : "border-zinc-800/60") : "")}
-                  on:click={() => { const next = new Set(expandedAlgos); next.has(algo) ? next.delete(algo) : next.add(algo); expandedAlgos = next; }}
+                  disabled={isPending}
+                  class={"w-full flex items-center gap-0 px-4 py-3 rounded-2xl transition-colors " + (isPending ? "cursor-default opacity-60" : "cursor-pointer " + (isLlm ? "hover:bg-indigo-500/5" : "hover:bg-zinc-900/60")) + (expandedAlgos.has(algo) ? " rounded-b-none border-b " + (isLlm ? "border-indigo-800/30" : "border-zinc-800/60") : "")}
+                  on:click={() => { if (isPending) return; const next = new Set(expandedAlgos); next.has(algo) ? next.delete(algo) : next.add(algo); expandedAlgos = next; }}
                 >
                   <!-- Label column: fixed 220px -->
                   <div class="w-[220px] shrink-0 flex items-center gap-3 pr-4">
@@ -449,9 +467,15 @@
                         {#if isLlm}<span class="rounded-full border border-indigo-800/60 bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-medium text-indigo-300">LLM</span>{/if}
                       </div>
                       <div class="flex items-center gap-2 mt-0.5">
-                        <span class="text-[11px] text-zinc-500">{segs.length} segs</span>
-                        {#if algoEndTimes[algo] && algoStartTimes[algo]}
-                          <span class="font-mono text-[11px] text-zinc-600 tabular-nums">{((algoEndTimes[algo] - algoStartTimes[algo]) / 1000).toFixed(1)}s</span>
+                        {#if isPending}
+                          <span class="text-[11px] text-zinc-600 italic">waiting…</span>
+                        {:else}
+                          <span class="text-[11px] text-zinc-500">{segs.length} seg</span>
+                          {#if workerTime != null}
+                            <span class="font-mono text-[11px] text-zinc-500 tabular-nums">{workerTime.toFixed(1)}s</span>
+                          {:else if algoEndTimes[algo] && algoStartTimes[algo]}
+                            <span class="font-mono text-[11px] text-zinc-600 tabular-nums">{((algoEndTimes[algo] - algoStartTimes[algo]) / 1000).toFixed(1)}s</span>
+                          {/if}
                         {/if}
                         {#if isLlm && results["llm__evaluation"]?.boundary_f_measure != null}
                           <span class="text-[11px] font-semibold tabular-nums {results['llm__evaluation'].boundary_f_measure >= 0.7 ? 'text-emerald-400' : results['llm__evaluation'].boundary_f_measure >= 0.5 ? 'text-amber-400' : 'text-red-400'}">
@@ -465,6 +489,12 @@
                   <!-- Timeline bar: flex-1 -->
                   <div class="flex-1 min-w-0">
                     <div class="relative h-10 rounded-xl overflow-hidden bg-zinc-900/80 w-full">
+                      {#if isPending}
+                        <div class="absolute inset-0 flex items-center justify-center gap-2">
+                          <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400"></span>
+                          <span class="text-[10px] text-zinc-600">processing</span>
+                        </div>
+                      {/if}
                       {#each segs as seg}
                         {@const left = (seg.start / globalMaxDur) * 100}
                         {@const width = Math.max((seg.end - seg.start) / globalMaxDur * 100, 0.2)}

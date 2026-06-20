@@ -71,7 +71,7 @@ services:
       music_segmentation_rabbitmq:
         condition: service_healthy
   worker-custom:
-    scale: ${CUSTOM_WORKER_REPLICAS:-1}
+    scale: ${CUSTOM_WORKER_REPLICAS:-3}
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -87,11 +87,11 @@ services:
       SERVICE_NAME: worker-custom
       WORKER_TYPE: custom_segmentation
       MESSAGE_CODE: segmentation.custom
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
       OMP_NUM_THREADS: ${OMP_NUM_THREADS:-1}
-      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-1}
-      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-1}
-      NUMEXPR_NUM_THREADS: ${NUMEXPR_NUM_THREADS:-1}
+      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-2}
+      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-2}
+      NUMEXPR_NUM_THREADS: ${NUMEXPR_NUM_THREADS:-2}
     depends_on:
       - music_segmentation_rabbitmq
   worker-msaf-foote:

@@ -10,6 +10,7 @@
   let concurrency = 3;
   let includeLLM = false;
   let llmMode = "deterministic";
+  let evalMode = "custom"; // "custom" | "fusion"
   let showLLMBatchConfirm = false;
   const WORKER_PRESETS = [2, 3, 4];
 
@@ -174,10 +175,14 @@
     startError         = null;
 
     try {
+      const algorithms = evalMode === "fusion"
+        ? ["custom_librosa", "foote", "cnmf", "scluster", "fusion"]
+        : ["custom_librosa"];
       const { job_id } = await startBatchEval({
         maxTracks: runAllDataset ? 0 : Number(maxTracks),
         toleranceSeconds: Number(tolerance),
         concurrency: Number(concurrency),
+        algorithms,
         includeLLM,
         llmMode,
       });
@@ -445,6 +450,26 @@
         <div class="flex justify-between mt-1 text-[10px] text-zinc-600">
           <span>0.5s</span><span>3.0s</span>
         </div>
+      </div>
+
+      <!-- Eval mode toggle -->
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-950/60 px-3 py-3">
+        <p class="text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-2">Eval Mode</p>
+        <div class="grid grid-cols-2 gap-1 rounded-xl bg-zinc-900 p-1">
+          <button
+            on:click={() => evalMode = "custom"}
+            disabled={running}
+            class="rounded-lg py-1.5 text-xs font-semibold transition-colors {evalMode === 'custom' ? 'bg-indigo-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}"
+          >Custom</button>
+          <button
+            on:click={() => evalMode = "fusion"}
+            disabled={running}
+            class="rounded-lg py-1.5 text-xs font-semibold transition-colors {evalMode === 'fusion' ? 'bg-indigo-500 text-white' : 'text-zinc-400 hover:text-zinc-200'}"
+          >Fusion</button>
+        </div>
+        <p class="mt-1.5 text-[10px] text-zinc-600">
+          {evalMode === "fusion" ? "Runs foote, cnmf, scluster, custom + fusion" : "Runs custom_librosa only — faster"}
+        </p>
       </div>
 
       <!-- AI Agent toggle -->

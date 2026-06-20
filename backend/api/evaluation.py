@@ -340,63 +340,69 @@ async def _run_batch_eval_async(
     def log(line: str) -> None:
         job["lines"].append(line)
 
-    async def eval_one(sid: str, title: str, idx: int, total: int) -> dict:
+    async def dispatch_one(sid: str, title: str) -> dict:
+        """Download audio + push to queue. Semaphore limits concurrent downloads."""
+        async with sem:
+            ref = await asyncio.to_thread(
+                lambda: parse_salami_annotation(sid, annotator=1)
+                        or parse_salami_annotation(sid, annotator=2)
+            )
+            if not ref:
+                return {"sid": sid, "title": title, "skip": "no_annotation", "ref": None}
+
+            audio = await asyncio.to_thread(_download_from_minio, sid)
+            if audio is None:
+                return {"sid": sid, "title": title, "skip": "minio_not_found", "ref": None}
+
+            task_id = await asyncio.to_thread(_dispatch_to_worker, audio, f"{sid}.mp3", requested_algorithms, llm_mode)
+            return {"sid": sid, "title": title, "task_id": task_id, "ref": ref}
+
+    async def collect_one(dispatch: dict, idx: int, total: int) -> list[dict] | dict:
+        """Poll for task result and compute metrics. No semaphore — all run concurrently."""
+        sid, title = dispatch["sid"], dispatch["title"]
+        if "skip" in dispatch:
+            reason = dispatch["skip"]
+            log(f"[{idx:>3}/{total}] {sid}  skip: {reason}")
+            return {"song_id": sid, "title": title, "error": reason}
         try:
-            async with sem:
-                ref = await asyncio.to_thread(
-                    lambda: parse_salami_annotation(sid, annotator=1)
-                            or parse_salami_annotation(sid, annotator=2)
-                )
-                if not ref:
-                    log(f"[{idx:>3}/{total}] {sid}  skip: no annotation")
-                    return {"song_id": sid, "title": title, "error": "no_annotation"}
+            results = await _wait_for_task_async(dispatch["task_id"])
+            if not results:
+                log(f"[{idx:>3}/{total}] {sid}  skip: timeout / worker failed")
+                return {"song_id": sid, "title": title, "error": "timeout"}
 
-                audio = await asyncio.to_thread(_download_from_minio, sid)
-                if audio is None:
-                    log(f"[{idx:>3}/{total}] {sid}  skip: not found in MinIO")
-                    return {"song_id": sid, "title": title, "error": "minio_not_found"}
+            ref = dispatch["ref"]
+            rows: list[dict] = []
+            for algo in algorithms_to_evaluate:
+                est = extract_segments(results.get(algo))
+                if not est:
+                    rows.append({"song_id": sid, "title": title, "algorithm": algo, "error": "missing_result"})
+                    continue
+                m2 = compute_boundary_metrics(ref, est, tolerance=tolerance)
+                m_multi = compute_boundary_metrics_multi(ref, est, tolerances=tolerances)
+                row = {
+                    "song_id":   sid,
+                    "title":     title,
+                    "algorithm": algo,
+                    "n_ref":     m2["n_boundaries_ref"],
+                    "n_est":     m2["n_boundaries_est"],
+                    "precision": m2["precision"],
+                    "recall":    m2["recall"],
+                    "f_measure": m2["f_measure"],
+                    "error":     "",
+                }
+                row.update({k: v for k, v in m_multi.items() if k != "by_tolerance"})
+                row["is_outlier"] = row.get("f1_3_0", 0.0) < coverage_outlier_threshold
+                rows.append(row)
 
-                task_id = await asyncio.to_thread(_dispatch_to_worker, audio, f"{sid}.mp3", requested_algorithms, llm_mode)
-
-                results = await _wait_for_task_async(task_id)
-                if not results:
-                    log(f"[{idx:>3}/{total}] {sid}  skip: timeout / worker failed")
-                    return {"song_id": sid, "title": title, "error": "timeout"}
-
-                rows: list[dict] = []
-                for algo in algorithms_to_evaluate:
-                    est = extract_segments(results.get(algo))
-                    if not est:
-                        rows.append({"song_id": sid, "title": title, "algorithm": algo, "error": "missing_result"})
-                        continue
-                    m2 = compute_boundary_metrics(ref, est, tolerance=tolerance)
-                    m_multi = compute_boundary_metrics_multi(ref, est, tolerances=tolerances)
-                    row = {
-                        "song_id":   sid,
-                        "title":     title,
-                        "algorithm": algo,
-                        "n_ref":     m2["n_boundaries_ref"],
-                        "n_est":     m2["n_boundaries_est"],
-                        "precision": m2["precision"],
-                        "recall":    m2["recall"],
-                        "f_measure": m2["f_measure"],
-                        "error":     "",
-                    }
-                    row.update({k: v for k, v in m_multi.items() if k != "by_tolerance"})
-                    row["is_outlier"] = row.get("f1_3_0", 0.0) < coverage_outlier_threshold
-                    rows.append(row)
-
-                ok_parts = [
-                    f"{r['algorithm']} F1={r.get('f_measure', 0):.3f}"
-                    for r in rows
-                    if not r.get("error")
-                ]
-                log(f"[{idx:>3}/{total}] {sid}  " + " | ".join(ok_parts))
-                return rows
+            ok_parts = [
+                f"{r['algorithm']} F1={r.get('f_measure', 0):.3f}"
+                for r in rows if not r.get("error")
+            ]
+            log(f"[{idx:>3}/{total}] {sid}  " + " | ".join(ok_parts))
+            return rows
         except Exception as exc:
-            import traceback
             log(f"[{idx:>3}/{total}] {sid}  EXCEPTION: {exc}")
-            logger.error("eval_one %s failed", sid, exc_info=True)
+            logger.error("collect_one %s failed", sid, exc_info=True)
             return {"song_id": sid, "title": title, "error": str(exc)}
 
     try:
@@ -416,11 +422,18 @@ async def _run_batch_eval_async(
             candidates = candidates[:max_tracks]
         log(f"Evaluating  : {len(candidates)} tracks  (concurrency={concurrency})\n")
 
-        coros = [
-            eval_one(sid, meta.get(sid, {}).get("title", sid), i, len(candidates))
-            for i, sid in enumerate(candidates, 1)
-        ]
-        gathered = list(await asyncio.gather(*coros))
+        # Phase 1: dispatch all tasks to the queue concurrently (semaphore limits downloads)
+        dispatches = list(await asyncio.gather(*[
+            dispatch_one(sid, meta.get(sid, {}).get("title", sid))
+            for sid in candidates
+        ]))
+        log(f"All {len(candidates)} tasks dispatched — waiting for results...\n")
+
+        # Phase 2: poll all tasks concurrently (no semaphore — just async waits)
+        gathered = list(await asyncio.gather(*[
+            collect_one(d, i, len(candidates))
+            for i, d in enumerate(dispatches, 1)
+        ]))
         rows: list[dict] = []
         for item in gathered:
             if isinstance(item, list):

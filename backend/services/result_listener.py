@@ -1,6 +1,5 @@
 import os
 import threading
-import time
 
 import requests
 
@@ -83,11 +82,6 @@ class ResultListener:
             diagnostics=data.get("diagnostics") or {},
         )
 
-    # After this many seconds, dispatch fusion with whatever base results are available.
-    FUSION_EARLY_DISPATCH_TIMEOUT = 40.0
-    # Minimum number of successful base results required before early dispatch.
-    FUSION_MIN_RESULTS = 2
-
     def _maybe_dispatch_fusion(self, task: SegmentationTask, current_results: dict) -> bool:
         expected = {canonical_algorithm_name(a) for a in (task.expected_algorithms or [])}
         if "fusion" not in expected:
@@ -96,11 +90,6 @@ class ResultListener:
             return False
         if current_results.get("fusion__dispatched"):
             return False
-
-        # Record when the first base result arrived so we can enforce a timeout.
-        if "fusion__first_result_time" not in current_results:
-            current_results["fusion__first_result_time"] = time.time()
-        elapsed = time.time() - float(current_results["fusion__first_result_time"])
 
         base_results: dict[str, dict] = {}
         resolved_algorithms: set[str] = set()
@@ -126,29 +115,14 @@ class ResultListener:
                     diagnostics={"warning": "Reconstructed fusion input from legacy segment list."},
                 )
 
-        have_all = len(resolved_algorithms) >= len(BASELINE_ALGORITHMS)
-        have_enough_for_early = len(base_results) >= self.FUSION_MIN_RESULTS and elapsed >= self.FUSION_EARLY_DISPATCH_TIMEOUT
-
-        if not have_all and not have_enough_for_early:
+        if len(resolved_algorithms) < len(BASELINE_ALGORITHMS):
             logger.info(
-                "Fusion for task %s waiting. Have=%s/%s results, %.1fs elapsed (timeout=%.0fs)",
+                "Fusion for task %s waiting for all baseline results. Have=%s/%s resolved",
                 task.task_id,
                 len(resolved_algorithms),
                 len(BASELINE_ALGORITHMS),
-                elapsed,
-                self.FUSION_EARLY_DISPATCH_TIMEOUT,
             )
             return False
-
-        slow_algorithms: list[str] = []
-        if have_enough_for_early and not have_all:
-            slow_algorithms = sorted(set(BASELINE_ALGORITHMS) - resolved_algorithms)
-            logger.warning(
-                "Fusion early dispatch for task %s after %.1fs. Still pending (slow): %s",
-                task.task_id,
-                elapsed,
-                slow_algorithms,
-            )
 
         if len(base_results) < 2:
             failure = normalize_algorithm_result(
@@ -193,7 +167,6 @@ class ResultListener:
             "params": {
                 **((task.requested_params or {}).get("fusion") or {}),
                 "failed_or_missing_algorithms": failed_algorithms,
-                "slow_or_pending_algorithms": slow_algorithms,
             },
             **audio_source,
         }
@@ -283,11 +256,11 @@ class ResultListener:
                     task.status = "processing"
                     logger.info(f"Task {task_id} processing. Received: {received}, Expected: {expected}")
                 
-                # Push update to SSE (even for partial results)
-                self._call_webhook(task)
-
                 session.commit()
                 logger.info(f"Updated DB for task {task_id}")
+
+                # Push update to SSE after commit so frontend refetches fresh data
+                self._call_webhook(task)
 
             ch.basic_ack(delivery_tag=method.delivery_tag)
 

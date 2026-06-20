@@ -170,12 +170,11 @@ def fuse_algorithm_results(
                 continue
 
     merge_window_seconds = float(params.get("merge_window_seconds", 2.5))
-    threshold = float(params.get("threshold", 0.45))
-    min_segment_duration = float(params.get("min_segment_duration_seconds", 8.0))
+    threshold = float(params.get("threshold", 0.30))
+    min_segment_duration = float(params.get("min_segment_duration_seconds", 5.0))
     anchor_strategy = str(params.get("anchor_strategy") or "custom_snap")
-    required_vote_count = int(params.get("required_vote_count", 2))
+    required_vote_count = int(params.get("required_vote_count", 1))
     semantic_enabled = bool(params.get("semantic_labeling_enabled", True))
-    slow_algorithms = list(params.get("slow_or_pending_algorithms") or [])
 
     normalized_inputs = {
         canonical_algorithm_name(algo): result
@@ -274,7 +273,6 @@ def fuse_algorithm_results(
         "input_algorithms": list(BASELINE_ALGORITHMS),
         "available_algorithms": sorted(normalized_inputs),
         "failed_or_missing_algorithms": failed_algorithms,
-            "slow_or_pending_algorithms": slow_algorithms,
         "boundary_groups": diagnostics_groups,
     }
 
