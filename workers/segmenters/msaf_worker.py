@@ -122,7 +122,7 @@ class MSAFWorker(BaseWorker):
             logger.info("[%s][%.2fs] boundary normalization + segment build segs=%d",
                         task_id, time.perf_counter() - t0, len(segments))
 
-            logger.info("[%s] apply_two_layer_labels START (audio reload for descriptors)", task_id)
+            logger.info("[%s] apply_two_layer_labels START", task_id)
             t0 = time.perf_counter()
             segments = apply_two_layer_labels(
                 segments,

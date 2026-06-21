@@ -111,6 +111,7 @@ def _find_ffmpeg() -> str | None:
     return None
 
 _FFMPEG_BIN: str | None = _find_ffmpeg()
+logger.info("ffmpeg binary: %s", _FFMPEG_BIN or "NOT FOUND — falling back to audioread (slow)")
 
 
 def _load_audio_ffmpeg(file_path: str, sr: int = _SR) -> tuple[np.ndarray, int]:

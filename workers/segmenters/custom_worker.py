@@ -1,10 +1,31 @@
 import os
+import time
+
+import numpy as np
 
 from shared.logger import get_logger
 from shared.segmentation_utils import normalize_algorithm_result
 from workers.BaseWorker import BaseWorker
 
 logger = get_logger()
+
+_SR = 22050
+
+
+def _warmup_pipeline() -> None:
+    """Force BLAS/scipy/librosa lazy-init before the first real task arrives.
+
+    Without this, the first call to librosa.feature.rms (active-region step)
+    triggers BLAS library loading inside Docker, which adds ~8-10s to that
+    step only. A 5-second sine wave is enough to exercise the full path.
+    """
+    from workers.segmenters.segmentation_service import _detect_active_region, _extract_downsampled_features
+
+    t0 = time.perf_counter()
+    y = np.sin(2 * np.pi * 440 * np.linspace(0, 5, _SR * 5, dtype=np.float32))
+    _detect_active_region(y, _SR)
+    _extract_downsampled_features(y, _SR)
+    logger.info("[worker-custom] Warmup completed in %.2fs", time.perf_counter() - t0)
 
 
 class CustomWorker(BaseWorker):
@@ -16,6 +37,7 @@ class CustomWorker(BaseWorker):
             queue_name=f"queue_{message_code}",
             routing_keys=[message_code],
         )
+        _warmup_pipeline()
 
     def process_task(self, task: dict) -> dict:
         task_id = task.get("task_id")

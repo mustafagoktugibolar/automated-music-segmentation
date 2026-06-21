@@ -7,1528 +7,1095 @@ pres.layout = "LAYOUT_WIDE";
 pres.title = "Automated Music Structure Segmentation";
 pres.author = "Capstone Team";
 
-// ─── COLOR PALETTE: Navy & Copper ──────────────────────────────────────────
+// ─── COLOR PALETTE ──────────────────────────────────────────────────────────
 const C = {
-  navy:      "1B2A4A",
-  navyMid:   "243556",
-  copper:    "B87333",
-  copperLt:  "D4944A",
-  slate:     "4A5568",
-  lightBg:   "F4F6FA",
-  white:     "FFFFFF",
-  offWhite:  "F8F9FC",
-  gray:      "718096",
-  grayLt:    "CBD5E0",
-  green:     "2D6A4F",
-  greenLt:   "52B788",
-  amber:     "B45309",
-  amberLt:   "F59E0B",
-  red:       "9B1C1C",
-  teal:      "0D9488",
+  navy:     "1B2A4A",
+  navyMid:  "243556",
+  copper:   "B87333",
+  copperLt: "D4944A",
+  slate:    "4A5568",
+  white:    "FFFFFF",
+  offWhite: "F4F6FA",
+  gray:     "718096",
+  grayLt:   "E2E8F0",
+  green:    "2D6A4F",
+  greenLt:  "52B788",
+  amber:    "B45309",
+  amberLt:  "F59E0B",
+  teal:     "0D9488",
+  red:      "9B1C1C",
+  purple:   "6D28D9",
 };
 
-// ─── PRESENTER ASSIGNMENTS ──────────────────────────────────────────────────
-// 3 people, ~7 slides each
-const PRESENTERS = {
-  1:  "Presenter 1",
-  2:  "Presenter 1",
-  3:  "Presenter 1",
-  4:  "Presenter 1",
-  5:  "Presenter 1",
-  6:  "Presenter 1",
-  7:  "Presenter 1",
-  8:  "Presenter 2",
-  9:  "Presenter 2",
-  10: "Presenter 2",
-  11: "Presenter 2",
-  12: "Presenter 2",
-  13: "Presenter 2",
-  14: "Presenter 3",
-  15: "Presenter 3",
-  16: "Presenter 3",
-  17: "Presenter 3",
-  18: "Presenter 3",
-  19: "Presenter 3",
-  20: "Presenter 3",
+// ─── PRESENTER ASSIGNMENTS ───────────────────────────────────────────────────
+// Slide 1–7 → Presenter 1, 8–14 → Presenter 2, 15–20 → Presenter 3
+const PRESENTER_MAP = {
+  1:"Presenter 1",2:"Presenter 1",3:"Presenter 1",4:"Presenter 1",
+  5:"Presenter 1",6:"Presenter 1",7:"Presenter 1",
+  8:"Presenter 2",9:"Presenter 2",10:"Presenter 2",11:"Presenter 2",
+  12:"Presenter 2",13:"Presenter 2",14:"Presenter 2",
+  15:"Presenter 3",16:"Presenter 3",17:"Presenter 3",18:"Presenter 3",
+  19:"Presenter 3",20:"Presenter 3",
+};
+const PRESENTER_COLORS = {
+  "Presenter 1": C.copper,
+  "Presenter 2": C.teal,
+  "Presenter 3": C.green,
 };
 
-// ─── HELPERS ────────────────────────────────────────────────────────────────
-
-function presenterBadge(slide, slideNum) {
-  const who = PRESENTERS[slideNum];
-  const colorMap = {
-    "Presenter 1": C.copper,
-    "Presenter 2": C.teal,
-    "Presenter 3": C.green,
-  };
-  const bg = colorMap[who] || C.slate;
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function badge(slide, n) {
+  const who = PRESENTER_MAP[n];
+  const col = PRESENTER_COLORS[who];
   slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 10.5, y: 6.9, w: 2.6, h: 0.38,
-    fill: { color: bg }, line: { color: bg }, rounding: 0.1,
+    x:10.5, y:7.0, w:2.6, h:0.34,
+    fill:{color:col}, line:{color:col}, rounding:0.08,
   });
   slide.addText(`🎤 ${who}`, {
-    x: 10.5, y: 6.9, w: 2.6, h: 0.38,
-    fontSize: 9, color: C.white, bold: true,
-    align: "center", valign: "middle", margin: 0,
+    x:10.5, y:7.0, w:2.6, h:0.34,
+    fontSize:9, color:C.white, bold:true,
+    align:"center", valign:"middle", margin:0,
   });
-}
-
-function slideNumLabel(slide, n) {
   slide.addText(`${n} / 20`, {
-    x: 0.2, y: 6.95, w: 1, h: 0.25,
-    fontSize: 8, color: C.gray, align: "left", margin: 0,
+    x:0.2, y:7.05, w:1, h:0.22,
+    fontSize:8, color:C.gray, align:"left", margin:0,
   });
 }
 
-// Standard navy header bar + white title
-function headerBar(slide, title, subtitle) {
-  slide.background = { color: C.offWhite };
-  // top accent bar
+function header(slide, title, subtitle) {
+  slide.background = {color:C.offWhite};
   slide.addShape(pres.shapes.RECTANGLE, {
-    x: 0, y: 0, w: 13.3, h: 1.15,
-    fill: { color: C.navy }, line: { color: C.navy },
+    x:0, y:0, w:13.3, h:1.15,
+    fill:{color:C.navy}, line:{color:C.navy},
   });
-  // copper accent line
   slide.addShape(pres.shapes.RECTANGLE, {
-    x: 0, y: 1.15, w: 13.3, h: 0.06,
-    fill: { color: C.copper }, line: { color: C.copper },
+    x:0, y:1.15, w:13.3, h:0.055,
+    fill:{color:C.copper}, line:{color:C.copper},
   });
   slide.addText(title, {
-    x: 0.4, y: 0.08, w: 11.5, h: 0.65,
-    fontSize: 26, color: C.white, bold: true, fontFace: "Georgia",
-    align: "left", valign: "middle", margin: 0,
+    x:0.4, y:0.08, w:11.5, h:0.66,
+    fontSize:26, color:C.white, bold:true, fontFace:"Georgia",
+    align:"left", valign:"middle", margin:0,
   });
   if (subtitle) {
     slide.addText(subtitle, {
-      x: 0.4, y: 0.73, w: 11.5, h: 0.38,
-      fontSize: 13, color: C.copperLt, bold: false, fontFace: "Calibri",
-      align: "left", valign: "middle", margin: 0,
+      x:0.4, y:0.73, w:11.5, h:0.38,
+      fontSize:13, color:C.copperLt, fontFace:"Calibri",
+      align:"left", valign:"middle", margin:0,
     });
   }
 }
 
-// Section divider (full navy slide)
-function sectionDivider(slide, section, desc) {
-  slide.background = { color: C.navy };
+function divider(slide, title, sub) {
+  slide.background = {color:C.navy};
   slide.addShape(pres.shapes.RECTANGLE, {
-    x: 0, y: 2.8, w: 13.3, h: 0.07,
-    fill: { color: C.copper }, line: { color: C.copper },
+    x:0, y:2.9, w:13.3, h:0.06,
+    fill:{color:C.copper}, line:{color:C.copper},
   });
-  slide.addText(section, {
-    x: 1, y: 1.8, w: 11.3, h: 1.1,
-    fontSize: 38, color: C.white, bold: true, fontFace: "Georgia",
-    align: "center", valign: "middle",
+  slide.addText(title, {
+    x:1, y:1.7, w:11.3, h:1.2,
+    fontSize:40, color:C.white, bold:true, fontFace:"Georgia",
+    align:"center", valign:"middle",
   });
-  if (desc) {
-    slide.addText(desc, {
-      x: 1.5, y: 3.2, w: 10.3, h: 0.9,
-      fontSize: 16, color: C.copperLt, fontFace: "Calibri",
-      align: "center", valign: "middle",
+  if (sub) {
+    slide.addText(sub, {
+      x:1.5, y:3.2, w:10.3, h:0.9,
+      fontSize:16, color:C.copperLt, fontFace:"Calibri",
+      align:"center",
     });
   }
 }
 
-function bulletBox(slide, items, opts) {
-  const { x, y, w, h, fontSize = 14, color = C.slate, bg, radius } = opts || {};
-  if (bg) {
-    slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y, w, h,
-      fill: { color: bg },
-      line: { color: bg },
-      rounding: radius || 0.08,
-    });
-  }
-  const richItems = [];
-  items.forEach((item, i) => {
-    richItems.push({
-      text: item,
-      options: {
-        bullet: true,
-        breakLine: i < items.length - 1,
-        fontSize,
-        color,
-        fontFace: "Calibri",
-      },
-    });
-  });
-  slide.addText(richItems, { x, y, w, h, valign: "top", margin: [8, 10, 8, 10] });
-}
-
-function infoCard(slide, titleText, bodyItems, x, y, w, h, accentColor) {
+// Reasoning card: Problem → Decision → Why it works
+function reasonCard(slide, x, y, w, h, problem, decision, why, accentColor) {
   const ac = accentColor || C.copper;
-  slide.addShape(pres.shapes.RECTANGLE, {
-    x, y, w, h,
-    fill: { color: C.white },
-    line: { color: C.grayLt, width: 1.2 },
-    shadow: { type: "outer", color: "000000", blur: 5, offset: 2, angle: 135, opacity: 0.08 },
-  });
-  // accent top border
-  slide.addShape(pres.shapes.RECTANGLE, {
-    x, y, w: w, h: 0.07,
-    fill: { color: ac }, line: { color: ac },
-  });
-  slide.addText(titleText, {
-    x: x + 0.12, y: y + 0.1, w: w - 0.24, h: 0.36,
-    fontSize: 12, bold: true, color: C.navy, fontFace: "Georgia",
-    align: "left", valign: "middle", margin: 0,
-  });
-  const richItems = [];
-  bodyItems.forEach((item, i) => {
-    richItems.push({
-      text: item,
-      options: {
-        bullet: true,
-        breakLine: i < bodyItems.length - 1,
-        fontSize: 11,
-        color: C.slate,
-        fontFace: "Calibri",
-      },
-    });
-  });
-  slide.addText(richItems, {
-    x: x + 0.12, y: y + 0.5, w: w - 0.24, h: h - 0.6,
-    valign: "top", margin: [4, 4, 4, 4],
-  });
-}
-
-function codeBox(slide, codeText, x, y, w, h) {
-  slide.addShape(pres.shapes.RECTANGLE, {
-    x, y, w, h,
-    fill: { color: "1E2A3A" },
-    line: { color: "2D3F55" },
-    rounding: 0.05,
-  });
-  slide.addText(codeText, {
-    x: x + 0.15, y: y + 0.1, w: w - 0.3, h: h - 0.2,
-    fontSize: 10, color: "7EC8E3", fontFace: "Courier New",
-    align: "left", valign: "top", margin: 0,
-  });
-}
-
-function formulaBox(slide, formulaText, x, y, w, h) {
   slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
     x, y, w, h,
-    fill: { color: "FFF8F0" },
-    line: { color: C.copper, width: 1.5 },
-    rounding: 0.05,
+    fill:{color:C.white}, line:{color:C.grayLt},
+    shadow:{type:"outer",color:"000000",blur:5,offset:1,angle:135,opacity:0.08},
+    rounding:0.08,
   });
-  slide.addText(formulaText, {
-    x: x + 0.15, y: y + 0.08, w: w - 0.3, h: h - 0.16,
-    fontSize: 11, color: C.navy, fontFace: "Courier New",
-    align: "left", valign: "middle", margin: 0,
-  });
-}
+  slide.addShape(pres.shapes.RECTANGLE, {x, y, w, h:0.055, fill:{color:ac}, line:{color:ac}});
 
-// ─── SLIDE 1: TITLE SLIDE ───────────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  s.background = { color: C.navy };
-  // decorative shapes
-  s.addShape(pres.shapes.OVAL, {
-    x: 10.5, y: -0.5, w: 4, h: 4,
-    fill: { color: "1F3460" }, line: { color: "1F3460" },
-  });
-  s.addShape(pres.shapes.OVAL, {
-    x: -1.2, y: 5.2, w: 3, h: 3,
-    fill: { color: "162440" }, line: { color: "162440" },
-  });
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0, y: 4.55, w: 13.3, h: 0.07,
-    fill: { color: C.copper }, line: { color: C.copper },
-  });
-
-  s.addText("Automated Music", {
-    x: 0.7, y: 1.0, w: 11, h: 1.0,
-    fontSize: 46, color: C.white, bold: true, fontFace: "Georgia",
-    align: "center",
-  });
-  s.addText("Structure Segmentation", {
-    x: 0.7, y: 1.95, w: 11, h: 1.0,
-    fontSize: 46, color: C.copperLt, bold: true, fontFace: "Georgia",
-    align: "center",
-  });
-  s.addText("Distributed Multi-Algorithm Boundary Detection with Two-Level Fusion", {
-    x: 1, y: 3.0, w: 11.3, h: 0.55,
-    fontSize: 15, color: C.grayLt, fontFace: "Calibri",
-    align: "center",
-  });
-  s.addText("Capstone Presentation  •  Spring 2026", {
-    x: 1, y: 3.65, w: 11.3, h: 0.45,
-    fontSize: 13, color: C.gray, fontFace: "Calibri",
-    align: "center",
-  });
-
-  // 3 presenter badges
-  const presenters = ["Presenter 1", "Presenter 2", "Presenter 3"];
-  const colors = [C.copper, C.teal, C.green];
-  presenters.forEach((p, i) => {
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x: 2.4 + i * 3.2, y: 4.85, w: 2.8, h: 0.4,
-      fill: { color: colors[i] }, line: { color: colors[i] }, rounding: 0.1,
+  const rh = (h - 0.1) / 3;
+  const labels = ["Problem", "Decision", "Why it works"];
+  const vals   = [problem, decision, why];
+  const cols   = [C.red, C.navy, C.green];
+  labels.forEach((lbl, i) => {
+    const iy = y + 0.12 + i * rh;
+    slide.addText(lbl.toUpperCase(), {
+      x:x+0.14, y:iy, w:w-0.28, h:0.22,
+      fontSize:8, color:cols[i], bold:true, fontFace:"Calibri",
+      align:"left", valign:"middle", margin:0,
     });
-    s.addText(p, {
-      x: 2.4 + i * 3.2, y: 4.85, w: 2.8, h: 0.4,
-      fontSize: 12, color: C.white, bold: true,
-      align: "center", valign: "middle", margin: 0,
+    slide.addText(vals[i], {
+      x:x+0.14, y:iy+0.22, w:w-0.28, h:rh-0.28,
+      fontSize:11, color:C.slate, fontFace:"Calibri",
+      align:"left", valign:"top", margin:0,
     });
-  });
-
-  slideNumLabel(s, 1);
-}
-
-// ─── SLIDE 2: AGENDA ────────────────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Presentation Agenda", "What we will cover in the next 30 minutes");
-  presenterBadge(s, 2);
-  slideNumLabel(s, 2);
-
-  const sections = [
-    ["01", "Problem & Motivation", "Why music segmentation is hard", C.copper],
-    ["02", "System Architecture", "Distributed workers, RabbitMQ, PostgreSQL", C.teal],
-    ["03", "Segmentation Methods", "Custom Librosa pipeline + MSAF baselines", C.green],
-    ["04", "Two-Level Fusion", "Feature fusion & algorithm-level voting", C.copper],
-    ["05", "Evaluation", "SALAMI dataset, precision/recall/F1", C.teal],
-    ["06", "Demo & Conclusion", "Live demo, limitations, future work", C.green],
-  ];
-
-  sections.forEach(([num, title, desc, color], i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const x = 0.35 + col * 6.5;
-    const y = 1.45 + row * 1.75;
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w: 6.1, h: 1.5,
-      fill: { color: C.white },
-      line: { color: C.grayLt },
-      shadow: { type: "outer", color: "000000", blur: 4, offset: 1, angle: 135, opacity: 0.07 },
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w: 0.06, h: 1.5,
-      fill: { color }, line: { color },
-    });
-    s.addText(num, {
-      x: x + 0.18, y: y + 0.08, w: 0.55, h: 0.55,
-      fontSize: 22, color, bold: true, fontFace: "Georgia",
-      align: "center", margin: 0,
-    });
-    s.addText(title, {
-      x: x + 0.8, y: y + 0.08, w: 5.1, h: 0.45,
-      fontSize: 14, color: C.navy, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle", margin: 0,
-    });
-    s.addText(desc, {
-      x: x + 0.8, y: y + 0.58, w: 5.1, h: 0.75,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top", margin: 0,
-    });
-  });
-}
-
-// ─── SLIDE 3: PROBLEM DEFINITION ────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Problem Definition", "Detecting structural boundaries in music automatically");
-  presenterBadge(s, 3);
-  slideNumLabel(s, 3);
-
-  // timeline graphic (simplified)
-  const timelineY = 1.8;
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.5, y: timelineY + 0.55, w: 12.2, h: 0.12,
-    fill: { color: C.grayLt }, line: { color: C.grayLt },
-  });
-  const sections = [
-    { label: "Intro", x: 0.5, w: 2.0, color: C.copper },
-    { label: "Verse", x: 2.6, w: 2.8, color: C.teal },
-    { label: "Chorus", x: 5.5, w: 2.5, color: C.green },
-    { label: "Verse", x: 8.1, w: 2.3, color: C.teal },
-    { label: "Outro", x: 10.5, w: 2.2, color: C.amber },
-  ];
-  sections.forEach(({ label, x, w, color }) => {
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y: timelineY, w, h: 0.7,
-      fill: { color }, line: { color },
-    });
-    s.addText(label, {
-      x, y: timelineY, w, h: 0.7,
-      fontSize: 12, color: C.white, bold: true,
-      align: "center", valign: "middle", margin: 0,
-    });
-  });
-  const boundaries = [2.5, 5.4, 7.95, 10.45];
-  boundaries.forEach((bx) => {
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: bx + 0.45, y: timelineY - 0.3, w: 0.04, h: 1.55,
-      fill: { color: "DC2626" }, line: { color: "DC2626" },
-    });
-    s.addText("▲ boundary", {
-      x: bx, y: timelineY + 1.25, w: 1.0, h: 0.3,
-      fontSize: 8, color: "DC2626", align: "center",
-    });
-  });
-
-  s.addText("0 s", { x: 0.4, y: timelineY + 0.7, w: 0.5, h: 0.25, fontSize: 9, color: C.gray, align: "left" });
-  s.addText("~240 s", { x: 12.3, y: timelineY + 0.7, w: 0.8, h: 0.25, fontSize: 9, color: C.gray, align: "right" });
-
-  // Key definitions
-  const defs = [
-    ["Boundary", "The exact timestamp where one section ends and another begins"],
-    ["Segment", "The time interval between two consecutive boundaries"],
-    ["Structural Label", "A/B/C grouping — which segments sound similar to each other"],
-    ["Semantic Label", "Intro/Verse/Chorus — human-readable musical role (heuristic)"],
-  ];
-  defs.forEach(([term, def], i) => {
-    const x = 0.35 + (i % 2) * 6.5;
-    const y = 3.1 + Math.floor(i / 2) * 0.9;
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w: 6.1, h: 0.75,
-      fill: { color: C.white }, line: { color: C.grayLt },
-    });
-    s.addText(`${term}:`, {
-      x: x + 0.12, y, w: 1.5, h: 0.75,
-      fontSize: 12, color: C.navy, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle",
-    });
-    s.addText(def, {
-      x: x + 1.6, y, w: 4.35, h: 0.75,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "middle",
-    });
-  });
-}
-
-// ─── SLIDE 4: WHY IS IT HARD? ───────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Why Music Segmentation Is Difficult", "No single signal reveals all structural boundaries");
-  presenterBadge(s, 4);
-  slideNumLabel(s, 4);
-
-  const challenges = [
-    { title: "Harmonic Change", desc: "Chord progression shifts, but energy may stay constant", icon: "🎵", color: C.copper },
-    { title: "Energy Change", desc: "RMS jump can be a drum fill, not a section change", icon: "⚡", color: C.teal },
-    { title: "Timbre Change", desc: "Guitar → full band entry marks transition, not pitch", icon: "🎸", color: C.green },
-    { title: "Rhythm / Onset", desc: "Onset density changes may be note events, not boundaries", icon: "🥁", color: C.amber },
-    { title: "Structural Repetition", desc: "Repeated Chorus must be detected via SSM patterns", icon: "🔁", color: C.navy },
-    { title: "Annotation Uncertainty", desc: "Human annotators disagree on exact milliseconds", icon: "❓", color: "9B1C1C" },
-  ];
-
-  challenges.forEach(({ title, desc, icon, color }, i) => {
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    const x = 0.3 + col * 4.35;
-    const y = 1.45 + row * 2.35;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y, w: 4.05, h: 2.15,
-      fill: { color: C.white },
-      line: { color: C.grayLt },
-      shadow: { type: "outer", color: "000000", blur: 5, offset: 1, angle: 135, opacity: 0.08 },
-      rounding: 0.08,
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w: 4.05, h: 0.06,
-      fill: { color }, line: { color },
-    });
-    s.addText(icon, {
-      x: x + 0.15, y: y + 0.15, w: 0.55, h: 0.55,
-      fontSize: 22, align: "center", valign: "middle",
-    });
-    s.addText(title, {
-      x: x + 0.75, y: y + 0.15, w: 3.15, h: 0.55,
-      fontSize: 12, color, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle",
-    });
-    s.addText(desc, {
-      x: x + 0.15, y: y + 0.75, w: 3.75, h: 1.25,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top",
-    });
-  });
-
-  s.addText("→  This motivates multi-feature, multi-algorithm, and tolerance-based evaluation", {
-    x: 0.3, y: 5.98, w: 12.7, h: 0.3,
-    fontSize: 11, color: C.copper, bold: true, fontFace: "Calibri",
-    align: "center",
-  });
-}
-
-// ─── SLIDE 5: HIGH-LEVEL ARCHITECTURE ───────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "System Architecture", "Distributed, asynchronous, modular design");
-  presenterBadge(s, 5);
-  slideNumLabel(s, 5);
-
-  // Architecture diagram using shapes
-  const boxes = [
-    { label: "Svelte\nFrontend", x: 0.3, y: 1.5, w: 2.0, h: 0.9, color: C.teal, textColor: C.white },
-    { label: "FastAPI\nBackend", x: 2.9, y: 1.5, w: 2.0, h: 0.9, color: C.navy, textColor: C.white },
-    { label: "Segmentation\nOrchestrator", x: 5.5, y: 1.5, w: 2.2, h: 0.9, color: C.navyMid, textColor: C.white },
-    { label: "RabbitMQ\nTopic Exchange", x: 8.3, y: 1.5, w: 2.2, h: 0.9, color: C.amber, textColor: C.white },
-    { label: "PostgreSQL\nTask Store", x: 5.5, y: 4.0, w: 2.2, h: 0.9, color: C.slate, textColor: C.white },
-    { label: "Result\nListener", x: 2.9, y: 4.0, w: 2.0, h: 0.9, color: C.green, textColor: C.white },
-  ];
-
-  boxes.forEach(({ label, x, y, w, h, color, textColor }) => {
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y, w, h, fill: { color }, line: { color }, rounding: 0.1,
-    });
-    s.addText(label, {
-      x, y, w, h,
-      fontSize: 11, color: textColor, bold: true, fontFace: "Calibri",
-      align: "center", valign: "middle",
-    });
-  });
-
-  // Workers column
-  const workers = [
-    { label: "custom_librosa\nworker", color: C.copper },
-    { label: "MSAF Foote\nworker", color: "6B7280" },
-    { label: "MSAF CNMF\nworker", color: "6B7280" },
-    { label: "MSAF SCluster\nworker", color: "6B7280" },
-    { label: "Fusion\nworker", color: "7C3AED" },
-  ];
-  workers.forEach(({ label, color }, i) => {
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x: 11.0, y: 1.35 + i * 1.0, w: 2.1, h: 0.8,
-      fill: { color }, line: { color }, rounding: 0.08,
-    });
-    s.addText(label, {
-      x: 11.0, y: 1.35 + i * 1.0, w: 2.1, h: 0.8,
-      fontSize: 9, color: C.white, bold: true,
-      align: "center", valign: "middle",
-    });
-    // arrow from RabbitMQ
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: 10.5, y: 1.7 + i * 1.0, w: 0.5, h: 0.03,
-      fill: { color: C.grayLt }, line: { color: C.grayLt },
-    });
-  });
-
-  // Arrows between top boxes
-  const arrows = [
-    [2.3, 1.95, 0.6],   // Frontend → FastAPI
-    [4.9, 1.95, 0.6],   // FastAPI → Orchestrator
-    [7.7, 1.95, 0.6],   // Orchestrator → RabbitMQ
-  ];
-  arrows.forEach(([x, y, w]) => {
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w, h: 0.03,
-      fill: { color: C.copper }, line: { color: C.copper },
-    });
-    s.addText("▶", { x: x + w - 0.1, y: y - 0.1, w: 0.25, h: 0.25, fontSize: 9, color: C.copper });
-  });
-
-  // Down arrow RabbitMQ → Workers area
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 9.35, y: 2.4, w: 0.03, h: 1.1,
-    fill: { color: C.copper }, line: { color: C.copper },
-  });
-
-  // segmentation.result → Listener
-  s.addText("segmentation.result", {
-    x: 4.5, y: 3.45, w: 2.8, h: 0.28,
-    fontSize: 9, color: C.copper, bold: true, align: "center",
-  });
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 5.65, y: 3.68, w: 0.03, h: 0.32,
-    fill: { color: C.copper }, line: { color: C.copper },
-  });
-
-  // Listener → PostgreSQL
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 4.9, y: 4.43, w: 0.6, h: 0.03,
-    fill: { color: C.copper }, line: { color: C.copper },
-  });
-
-  // Frontend ← result (bottom)
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.3, y: 4.5, w: 2.6, h: 0.03,
-    fill: { color: C.teal }, line: { color: C.teal },
-  });
-  s.addText("SSE / status polling", {
-    x: 0.3, y: 4.6, w: 2.6, h: 0.25,
-    fontSize: 8, color: C.teal, align: "center",
-  });
-
-  // Key insight box
-  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 0.3, y: 5.85, w: 12.7, h: 0.4,
-    fill: { color: "EFF6FF" }, line: { color: C.teal }, rounding: 0.05,
-  });
-  s.addText("Key Design Decision: API never does audio processing — it dispatches tasks to independent workers via RabbitMQ", {
-    x: 0.5, y: 5.85, w: 12.3, h: 0.4,
-    fontSize: 11, color: C.navy, bold: true, fontFace: "Calibri",
-    align: "center", valign: "middle",
-  });
-}
-
-// ─── SLIDE 6: REQUEST LIFECYCLE ──────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "End-to-End Request Lifecycle", "From user upload to completed segmentation result");
-  presenterBadge(s, 6);
-  slideNumLabel(s, 6);
-
-  const steps = [
-    ["01", "User uploads audio or selects from storage (song_id)", C.copper],
-    ["02", "FastAPI validates file type, algorithm names, and params via Pydantic schemas", C.teal],
-    ["03", "Orchestrator normalizes algorithm names, generates UUID task_id", C.green],
-    ["04", "Task inserted into PostgreSQL with status=processing, expected_algorithms, results={}", C.amber],
-    ["05", "Base worker messages published to RabbitMQ with per-algorithm routing keys", C.copper],
-    ["06", "Workers run in parallel — audio analysis, DSP, boundary detection", C.teal],
-    ["07", "Each worker publishes result to segmentation.result routing key", C.green],
-    ["08", "ResultListener normalizes result, stores in DB, checks fusion readiness", C.amber],
-    ["09", "When all expected results arrive, task status → completed", C.copper],
-    ["10", "Frontend reads final result via SSE stream or status polling", C.teal],
-  ];
-
-  steps.forEach(([num, text, color], i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const x = 0.3 + col * 6.55;
-    const y = 1.42 + row * 1.05;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y, w: 0.55, h: 0.75,
-      fill: { color }, line: { color }, rounding: 0.08,
-    });
-    s.addText(num, {
-      x, y, w: 0.55, h: 0.75,
-      fontSize: 14, color: C.white, bold: true,
-      align: "center", valign: "middle", margin: 0,
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: x + 0.55, y: y + 0.08, w: 5.8, h: 0.6,
-      fill: { color: C.white }, line: { color: C.grayLt },
-    });
-    s.addText(text, {
-      x: x + 0.7, y: y + 0.08, w: 5.65, h: 0.6,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "middle", margin: [4, 6, 4, 6],
-    });
-  });
-
-  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 0.3, y: 6.7, w: 12.7, h: 0.38,
-    fill: { color: "FFF7ED" }, line: { color: C.copper }, rounding: 0.05,
-  });
-  s.addText("expected vs dispatch: fusion is expected but NOT dispatched immediately — it waits for all base results first", {
-    x: 0.5, y: 6.7, w: 12.3, h: 0.38,
-    fontSize: 10, color: C.amber, bold: true, fontFace: "Calibri",
-    align: "center", valign: "middle",
-  });
-}
-
-// ─── SLIDE 7: COMMON RESULT SCHEMA ──────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Common Result Schema", "All algorithms speak the same language for fusion & evaluation");
-  presenterBadge(s, 7);
-  slideNumLabel(s, 7);
-
-  // Left: schema objects
-  infoCard(s, "Boundary", [
-    "time — timestamp in seconds",
-    "confidence — 0–1 evidence strength",
-    "source — which algorithm/feature",
-    "sources — list if fusion contributed",
-    "metadata — score, raw votes",
-  ], 0.3, 1.42, 3.9, 2.7, C.copper);
-
-  infoCard(s, "Segment", [
-    "start, end — time interval",
-    "structural_label — A/B/C similarity group",
-    "semantic_label — Intro/Verse/Chorus (heuristic)",
-    "label_confidence, semantic_confidence",
-    "sources — contributing algorithms",
-  ], 0.3, 4.22, 3.9, 2.6, C.teal);
-
-  infoCard(s, "AlgorithmResult", [
-    "task_id, status — completed | failed",
-    "worker_type — custom, msaf, fusion",
-    "algorithm — canonical name",
-    "duration_seconds — track length",
-    "boundaries[], segments[], diagnostics{}",
-  ], 4.3, 1.42, 4.1, 2.7, C.green);
-
-  // Right: JSON example
-  codeBox(s, `{
-  "task_id": "abc-123",
-  "status": "completed",
-  "worker_type": "msaf",
-  "algorithm": "foote",
-  "duration_seconds": 180.2,
-  "boundaries": [
-    { "time": 31.4,
-      "confidence": 1.0,
-      "source": "foote" }
-  ],
-  "segments": [
-    { "start": 0.0,
-      "end": 31.4,
-      "structural_label": "A",
-      "semantic_label": "Intro" }
-  ]
-}`, 8.5, 1.42, 4.6, 5.4);
-
-  s.addText("Why schema matters: fusion & evaluation never need algorithm-specific parsers", {
-    x: 0.3, y: 6.88, w: 12.7, h: 0.3,
-    fontSize: 11, color: C.copper, bold: true, fontFace: "Calibri",
-    align: "center",
-  });
-}
-
-// ─── SLIDE 8: SECTION DIVIDER ────────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  sectionDivider(s, "Segmentation Methods", "Custom Librosa Pipeline  •  MSAF Baselines: Foote, CNMF, SCluster");
-  presenterBadge(s, 8);
-  slideNumLabel(s, 8);
-}
-
-// ─── SLIDE 9: CUSTOM LIBROSA PIPELINE ───────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Custom Librosa Pipeline", "Deterministic multi-feature segmentation with feature-level fusion");
-  presenterBadge(s, 9);
-  slideNumLabel(s, 9);
-
-  // Pipeline flow diagram
-  const stages = [
-    { label: "Audio Load\n(ffmpeg, mono,\n22050 Hz)", color: C.slate },
-    { label: "Active Region\nDetection\n(RMS threshold)", color: C.teal },
-    { label: "Feature\nExtraction\n(Chroma-CENS\n+ MFCC)", color: C.green },
-    { label: "Self-Similarity\nMatrix (SSM)\n+ Novelty", color: C.copper },
-    { label: "Multi-Feature\nCandidates\n(RMS, Onset,\nChord, Beat)", color: C.amber },
-    { label: "Feature-Level\nFusion\n(Weighted score\n+ snapping)", color: "7C3AED" },
-    { label: "Segments\n+ Labels\n(A/B/C structural\n+ semantic)", color: C.navy },
-  ];
-
-  stages.forEach(({ label, color }, i) => {
-    const x = 0.3 + i * 1.84;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y: 1.5, w: 1.65, h: 2.6,
-      fill: { color }, line: { color }, rounding: 0.1,
-    });
-    s.addText(label, {
-      x, y: 1.5, w: 1.65, h: 2.6,
-      fontSize: 9.5, color: C.white, bold: true, fontFace: "Calibri",
-      align: "center", valign: "middle",
-    });
-    if (i < stages.length - 1) {
-      s.addText("→", {
-        x: x + 1.65, y: 2.55, w: 0.19, h: 0.4,
-        fontSize: 14, color: C.copper, bold: true,
-        align: "center",
+    if (i < 2) {
+      slide.addShape(pres.shapes.RECTANGLE, {
+        x:x+0.14, y:iy+rh-0.04, w:w-0.28, h:0.01,
+        fill:{color:C.grayLt}, line:{color:C.grayLt},
       });
     }
   });
-
-  // Key feature explanations
-  const feats = [
-    ["Chroma-CENS", "12 pitch classes, octave-invariant, captures harmonic repetition", C.green],
-    ["MFCC", "Spectral envelope (timbre) — detects instrument/texture changes", C.teal],
-    ["SSM (Self-Similarity Matrix)", "Each frame vs every other frame — reveals repeated sections as bright blocks", C.copper],
-    ["Active Region Detection", "Crops leading/trailing silence using RMS+dB; timestamps restored at end", C.slate],
-  ];
-
-  feats.forEach(([name, desc, color], i) => {
-    const x = 0.3 + (i % 2) * 6.55;
-    const y = 4.5 + Math.floor(i / 2) * 0.95;
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w: 0.06, h: 0.75,
-      fill: { color }, line: { color },
-    });
-    s.addText(name, {
-      x: x + 0.2, y, w: 6.1, h: 0.3,
-      fontSize: 11, color, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle", margin: 0,
-    });
-    s.addText(desc, {
-      x: x + 0.2, y: y + 0.3, w: 6.1, h: 0.45,
-      fontSize: 10, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top", margin: 0,
-    });
-  });
 }
 
-// ─── SLIDE 10: MSAF BASELINES ───────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "MSAF Baseline Algorithms", "Three complementary mathematical perspectives on structure");
-  presenterBadge(s, 10);
-  slideNumLabel(s, 10);
-
-  const algos = [
-    {
-      name: "Foote",
-      color: "5B21B6",
-      math: "Checkerboard Novelty",
-      desc: "Applies a checkerboard kernel to the SSM diagonal. High response where before/after similarity structure changes sharply. Detects local transitions.",
-      strength: "Fast, explainable, detects sharp transitions",
-      risk: "Sensitive to non-structural transients (e.g., drum fills)",
+// Simple bullet text box
+function bullets(slide, items, x, y, w, h, fontSize, color) {
+  const rich = items.map((txt, i) => ({
+    text: txt,
+    options: {
+      bullet:true,
+      breakLine: i < items.length - 1,
+      fontSize: fontSize || 13,
+      color: color || C.slate,
+      fontFace:"Calibri",
     },
-    {
-      name: "CNMF",
-      color: C.teal,
-      math: "Convex Non-negative Matrix Factorization",
-      desc: "Factorizes the feature matrix into recurring latent components. Sections emerge as regions dominated by consistent activation patterns.",
-      strength: "Captures repeated latent patterns across the track",
-      risk: "Factorization rank choice affects boundary granularity",
-    },
-    {
-      name: "SCluster",
-      color: C.green,
-      math: "Spectral Clustering on Affinity Graph",
-      desc: "Treats the similarity structure as a graph and applies spectral clustering. Uses global organization to determine section boundaries.",
-      strength: "Global structure-aware; handles repeated sections well",
-      risk: "Cluster count parameter influences segment number",
-    },
-  ];
-
-  algos.forEach(({ name, color, math, desc, strength, risk }, i) => {
-    const x = 0.3 + i * 4.35;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y: 1.42, w: 4.05, h: 5.55,
-      fill: { color: C.white }, line: { color: C.grayLt },
-      shadow: { type: "outer", color: "000000", blur: 5, offset: 1, angle: 135, opacity: 0.08 },
-      rounding: 0.1,
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y: 1.42, w: 4.05, h: 0.52,
-      fill: { color }, line: { color },
-    });
-    s.addText(name, {
-      x, y: 1.42, w: 4.05, h: 0.52,
-      fontSize: 20, color: C.white, bold: true, fontFace: "Georgia",
-      align: "center", valign: "middle", margin: 0,
-    });
-    s.addText(math, {
-      x: x + 0.15, y: 2.02, w: 3.75, h: 0.38,
-      fontSize: 10, color, bold: true, fontFace: "Calibri",
-      align: "center",
-    });
-    s.addText(desc, {
-      x: x + 0.15, y: 2.42, w: 3.75, h: 2.1,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top",
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: x + 0.15, y: 4.58, w: 3.75, h: 0.03,
-      fill: { color: C.grayLt }, line: { color: C.grayLt },
-    });
-    s.addText("✓ " + strength, {
-      x: x + 0.15, y: 4.65, w: 3.75, h: 0.4,
-      fontSize: 10, color: C.green, fontFace: "Calibri", align: "left", valign: "top",
-    });
-    s.addText("⚠ " + risk, {
-      x: x + 0.15, y: 5.08, w: 3.75, h: 0.55,
-      fontSize: 10, color: C.amber, fontFace: "Calibri", align: "left", valign: "top",
-    });
-  });
-
-  s.addText("Diversity of error profiles is the key value — this is exactly why algorithm-level fusion is needed", {
-    x: 0.3, y: 7.1, w: 12.7, h: 0.28,
-    fontSize: 11, color: C.copper, bold: true, fontFace: "Calibri", align: "center",
-  });
+  }));
+  slide.addText(rich, {x, y, w, h, valign:"top", margin:[6,10,6,10]});
 }
 
-// ─── SLIDE 11: FEATURE-LEVEL FUSION SOURCES ─────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Feature-Level Fusion: Candidate Sources", "Six independent evidence streams inside the custom_librosa pipeline");
-  presenterBadge(s, 11);
-  slideNumLabel(s, 11);
-
-  const sources = [
-    { name: "SSM Novelty", weight: "0.42", desc: "Checkerboard response on Self-Similarity Matrix — structural change evidence. Can pass acceptance alone if confidence ≥ 0.5.", color: C.copper },
-    { name: "Chord Proxy", weight: "0.18", desc: "Cosine similarity drop between Chroma-CENS frames ~0.5 s apart — harmonic change without full chord recognition.", color: C.teal },
-    { name: "Lyrics", weight: "0.10", desc: "Timed lyric line boundaries as secondary evidence. Pipeline remains fully deterministic if lyrics absent.", color: C.green },
-    { name: "Onset Flux", weight: "0.06", desc: "Spectral flux novelty curve — measures new note/attack density changes across frames.", color: C.amber },
-    { name: "RMS Energy", weight: "0.06", desc: "Absolute RMS level is NOT used — the derivative of RMS in dB is used to detect energy change events.", color: "7C3AED" },
-    { name: "Beat / Phrase", weight: "0.02", desc: "16/24/32/48-beat phrase-grid candidates. Provides rhythmic alignment support and snapping anchor.", color: C.navy },
-  ];
-
-  // Bar chart visual
-  s.addText("Default Source Weights", {
-    x: 0.3, y: 1.38, w: 4.5, h: 0.35,
-    fontSize: 12, color: C.navy, bold: true, fontFace: "Georgia",
-    align: "left",
-  });
-  const maxW = 4.0;
-  sources.forEach(({ name, weight, color }, i) => {
-    const barW = parseFloat(weight) * maxW / 0.42;
-    const y = 1.8 + i * 0.73;
-    s.addText(name, {
-      x: 0.3, y, w: 1.7, h: 0.55,
-      fontSize: 10, color: C.slate, fontFace: "Calibri",
-      align: "right", valign: "middle",
+// Arrow flow: array of {label, color} in a row
+function flowRow(slide, items, x, y, itemW, itemH) {
+  items.forEach(({label, color, textColor}, i) => {
+    const ix = x + i * (itemW + 0.22);
+    slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+      x:ix, y, w:itemW, h:itemH,
+      fill:{color:color||C.navy}, line:{color:color||C.navy}, rounding:0.09,
     });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: 2.1, y: y + 0.08, w: barW, h: 0.4,
-      fill: { color }, line: { color },
+    slide.addText(label, {
+      x:ix, y, w:itemW, h:itemH,
+      fontSize:10, color:textColor||C.white, bold:true, fontFace:"Calibri",
+      align:"center", valign:"middle",
     });
-    s.addText(weight, {
-      x: 2.15 + barW, y: y + 0.08, w: 0.5, h: 0.4,
-      fontSize: 10, color, bold: true,
-      align: "left", valign: "middle",
-    });
-  });
-
-  // Right column: card per source with desc
-  sources.forEach(({ name, desc, color }, i) => {
-    const x = 7.0;
-    const y = 1.42 + i * 0.98;
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y, w: 0.05, h: 0.75,
-      fill: { color }, line: { color },
-    });
-    s.addText(name + ":", {
-      x: x + 0.15, y, w: 2.1, h: 0.75,
-      fontSize: 10, color, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle",
-    });
-    s.addText(desc, {
-      x: x + 2.3, y, w: 3.7, h: 0.75,
-      fontSize: 10, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "middle",
-    });
-  });
-}
-
-// ─── SLIDE 12: FEATURE-LEVEL FUSION FORMULA ─────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Feature-Level Fusion: Scoring & Acceptance", "Weighted score + agreement bonus → acceptance decision");
-  presenterBadge(s, 12);
-  slideNumLabel(s, 12);
-
-  // Steps
-  const steps = [
-    { n: "1", title: "Temporal Grouping", desc: "Nearby candidates (within merge_window_s = 2.75 s) are placed in the same group — they vote on the same structural transition." },
-    { n: "2", title: "One Vote per Source", desc: "Each feature source contributes only its highest-confidence candidate per group — prevents noisy sources from dominating." },
-    { n: "3", title: "Weighted Score", desc: "Score = Σ (source_weight × candidate_confidence)  +  agreement_bonus\nagreement_bonus = min(0.15, 0.035 × (source_count − 1))" },
-    { n: "4", title: "Acceptance", desc: "Accept if score ≥ threshold (default 0.30), OR if strong SSM candidate exists (confidence ≥ 0.5) — SSM can pass alone." },
-    { n: "5", title: "Snapping", desc: "Accepted boundary is snapped to nearest strong onset or beat within a limited window for precise timing alignment." },
-  ];
-
-  steps.forEach(({ n, title, desc }, i) => {
-    const y = 1.42 + i * 1.05;
-    s.addShape(pres.shapes.OVAL, {
-      x: 0.3, y: y + 0.1, w: 0.52, h: 0.52,
-      fill: { color: C.navy }, line: { color: C.navy },
-    });
-    s.addText(n, {
-      x: 0.3, y: y + 0.1, w: 0.52, h: 0.52,
-      fontSize: 13, color: C.white, bold: true,
-      align: "center", valign: "middle",
-    });
-    s.addText(title, {
-      x: 0.95, y, w: 3.3, h: 0.38,
-      fontSize: 12, color: C.navy, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle",
-    });
-    s.addText(desc, {
-      x: 0.95, y: y + 0.38, w: 5.5, h: 0.62,
-      fontSize: 10, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top",
-    });
-  });
-
-  // Numeric example
-  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 7.0, y: 1.42, w: 6.0, h: 5.85,
-    fill: { color: C.white }, line: { color: C.grayLt },
-    shadow: { type: "outer", color: "000000", blur: 5, offset: 1, angle: 135, opacity: 0.08 },
-    rounding: 0.1,
-  });
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 7.0, y: 1.42, w: 6.0, h: 0.45,
-    fill: { color: C.navy }, line: { color: C.navy },
-  });
-  s.addText("Numeric Example — Boundary at ~31 s", {
-    x: 7.1, y: 1.42, w: 5.8, h: 0.45,
-    fontSize: 12, color: C.white, bold: true, fontFace: "Georgia",
-    align: "center", valign: "middle",
-  });
-
-  codeBox(s, `SSM:    weight=0.42 × conf=0.80 = 0.336
-Chord:  weight=0.18 × conf=0.70 = 0.126
-RMS:    weight=0.06 × conf=0.60 = 0.036
-
-weighted_sum           = 0.498
-agreement_bonus (3 src)= min(0.15, 0.035×2) = 0.070
-─────────────────────────────────────────
-score                  = 0.568
-
-threshold = 0.30   →   ACCEPTED ✓
-
-Anchor: SSM at 30.82 s
-Strong onset nearby: 30.67 s
-Snapped boundary: 30.67 s`, 7.1, 1.92, 5.8, 5.25);
-}
-
-// ─── SLIDE 13: SECTION DIVIDER — ALGORITHM FUSION ───────────────────────────
-{
-  const s = pres.addSlide();
-  sectionDivider(s, "Algorithm-Level Fusion", "Combining four independent segmenters with weighted voting");
-  presenterBadge(s, 13);
-  slideNumLabel(s, 13);
-}
-
-// ─── SLIDE 14: WHY ALGORITHM FUSION ─────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Why Algorithm-Level Fusion?", "Different algorithms have different error profiles — consensus reduces mistakes");
-  presenterBadge(s, 14);
-  slideNumLabel(s, 14);
-
-  // Timeline comparison
-  const timelines = [
-    { label: "custom_librosa", boundaries: [20, 48, 80, 112], color: C.copper },
-    { label: "foote", boundaries: [22, 49, 81, 110], color: "5B21B6" },
-    { label: "cnmf", boundaries: [19, 47, 85, 113], color: C.teal },
-    { label: "scluster", boundaries: [21, 50, 80, 115], color: C.green },
-    { label: "FUSION", boundaries: [21, 49, 81, 112], color: C.navy },
-  ];
-
-  const totalDur = 130;
-  const trackW = 10.5;
-  const startX = 1.5;
-
-  timelines.forEach(({ label, boundaries, color }, i) => {
-    const y = 1.65 + i * 1.0;
-    const isFusion = label === "FUSION";
-    // track bar
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: startX, y: y + 0.25, w: trackW, h: isFusion ? 0.45 : 0.35,
-      fill: { color: isFusion ? "EFF6FF" : "F0F4F8" },
-      line: { color: color, width: isFusion ? 2 : 1 },
-    });
-    s.addText(label, {
-      x: 0.05, y: y + 0.1, w: 1.4, h: 0.55,
-      fontSize: isFusion ? 12 : 10, color, bold: isFusion, fontFace: "Calibri",
-      align: "right", valign: "middle",
-    });
-    boundaries.forEach((b) => {
-      const bx = startX + (b / totalDur) * trackW;
-      s.addShape(pres.shapes.RECTANGLE, {
-        x: bx - 0.015, y: y + 0.1, w: 0.04, h: isFusion ? 0.65 : 0.55,
-        fill: { color }, line: { color },
-      });
-    });
-  });
-
-  // 0s / end label
-  s.addText("0 s", { x: startX, y: 6.7, w: 0.5, h: 0.25, fontSize: 9, color: C.gray, align: "left" });
-  s.addText("130 s", { x: startX + trackW - 0.5, y: 6.7, w: 0.6, h: 0.25, fontSize: 9, color: C.gray, align: "right" });
-
-  // Why not average?
-  const reasons = [
-    "Algorithms produce different numbers of boundaries",
-    "Same transition may be predicted at slightly different timestamps",
-    "Algorithm reliability is not equal — custom pipeline is more informed",
-    "Confidence values carry additional evidence strength per boundary",
-  ];
-  s.addText("Why not simple averaging?", {
-    x: 7.5, y: 1.65, w: 5.5, h: 0.38,
-    fontSize: 13, color: C.navy, bold: true, fontFace: "Georgia", align: "left",
-  });
-  reasons.forEach((r, i) => {
-    s.addShape(pres.shapes.OVAL, {
-      x: 7.5, y: 2.1 + i * 0.7, w: 0.22, h: 0.22,
-      fill: { color: C.copper }, line: { color: C.copper },
-    });
-    s.addText(r, {
-      x: 7.8, y: 2.06 + i * 0.7, w: 5.2, h: 0.55,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "middle",
-    });
-  });
-
-  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 7.5, y: 4.95, w: 5.5, h: 0.85,
-    fill: { color: "F0FDF4" }, line: { color: C.green }, rounding: 0.08,
-  });
-  s.addText("→ Weighted voting groups nearby votes, deduplicates per-algorithm, and computes:\n     score = Σ (algorithm_weight × boundary_confidence)", {
-    x: 7.65, y: 4.98, w: 5.2, h: 0.79,
-    fontSize: 10, color: C.green, fontFace: "Calibri", align: "left", valign: "middle",
-  });
-}
-
-// ─── SLIDE 15: FUSION ORCHESTRATION ─────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Fusion Orchestration & Readiness", "ResultListener coordinates the two-phase dispatch sequence");
-  presenterBadge(s, 15);
-  slideNumLabel(s, 15);
-
-  // State machine flow
-  const states = [
-    { label: "Fusion\nRequested", color: C.slate },
-    { label: "Base Workers\nDispatched\n(4 parallel)", color: C.teal },
-    { label: "Base Results\nCollected", color: C.green },
-    { label: "Readiness\nChecked\n(all 4 resolved?)", color: C.amber },
-    { label: "Fusion\nDispatched", color: C.copper },
-    { label: "Task\nCompleted", color: C.navy },
-  ];
-
-  states.forEach(({ label, color }, i) => {
-    const x = 0.3 + i * 2.15;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y: 1.55, w: 1.9, h: 1.55,
-      fill: { color }, line: { color }, rounding: 0.1,
-    });
-    s.addText(label, {
-      x, y: 1.55, w: 1.9, h: 1.55,
-      fontSize: 10, color: C.white, bold: true, fontFace: "Calibri",
-      align: "center", valign: "middle",
-    });
-    if (i < states.length - 1) {
-      s.addText("→", {
-        x: x + 1.9, y: 2.15, w: 0.25, h: 0.4,
-        fontSize: 14, color: C.copper, bold: true, align: "center",
+    if (i < items.length - 1) {
+      slide.addText("→", {
+        x:ix+itemW, y:y+itemH/2-0.15, w:0.22, h:0.3,
+        fontSize:13, color:C.copper, bold:true, align:"center",
       });
     }
   });
+}
 
-  // _maybe_dispatch_fusion() logic
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.3, y: 3.5, w: 12.7, h: 0.42,
-    fill: { color: C.navy }, line: { color: C.navy },
+// Highlight quote bar
+function quoteBar(slide, text, y) {
+  slide.addShape(pres.shapes.RECTANGLE, {
+    x:0, y, w:13.3, h:0.46,
+    fill:{color:C.navy}, line:{color:C.navy},
   });
-  s.addText("_maybe_dispatch_fusion()  —  ResultListener guard conditions", {
-    x: 0.3, y: 3.5, w: 12.7, h: 0.42,
-    fontSize: 12, color: C.white, bold: true, fontFace: "Georgia",
-    align: "center", valign: "middle",
+  slide.addText(text, {
+    x:0.4, y, w:12.5, h:0.46,
+    fontSize:11, color:C.copperLt, fontFace:"Calibri",
+    align:"center", valign:"middle",
+  });
+}
+
+// Comparison: two-column YES vs NO / A vs B
+function vsBox(slide, leftTitle, leftItems, rightTitle, rightItems, x, y, w, h, leftColor, rightColor) {
+  const colW = w / 2 - 0.05;
+  const lc = leftColor || C.green;
+  const rc = rightColor || C.red;
+  // left
+  slide.addShape(pres.shapes.RECTANGLE, {x, y, w:colW, h, fill:{color:C.white}, line:{color:C.grayLt}});
+  slide.addShape(pres.shapes.RECTANGLE, {x, y, w:colW, h:0.45, fill:{color:lc}, line:{color:lc}});
+  slide.addText(leftTitle, {x, y, w:colW, h:0.45, fontSize:13, color:C.white, bold:true, fontFace:"Georgia", align:"center", valign:"middle"});
+  bullets(slide, leftItems, x+0.1, y+0.52, colW-0.2, h-0.6, 11, C.slate);
+  // right
+  const rx = x + colW + 0.1;
+  slide.addShape(pres.shapes.RECTANGLE, {x:rx, y, w:colW, h, fill:{color:C.white}, line:{color:C.grayLt}});
+  slide.addShape(pres.shapes.RECTANGLE, {x:rx, y, w:colW, h:0.45, fill:{color:rc}, line:{color:rc}});
+  slide.addText(rightTitle, {x:rx, y, w:colW, h:0.45, fontSize:13, color:C.white, bold:true, fontFace:"Georgia", align:"center", valign:"middle"});
+  bullets(slide, rightItems, rx+0.1, y+0.52, colW-0.2, h-0.6, 11, C.slate);
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 1 — TITLE
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  s.background = {color:C.navy};
+  s.addShape(pres.shapes.OVAL, {x:10.8,y:-0.6,w:4,h:4, fill:{color:"1F3460"}, line:{color:"1F3460"}});
+  s.addShape(pres.shapes.OVAL, {x:-1.2,y:5.5,w:3,h:3, fill:{color:"162440"}, line:{color:"162440"}});
+  s.addShape(pres.shapes.RECTANGLE, {x:0,y:4.6,w:13.3,h:0.07, fill:{color:C.copper}, line:{color:C.copper}});
+
+  s.addText("Automated Music", {x:0.7,y:0.9,w:11,h:1.0, fontSize:46,color:C.white,bold:true,fontFace:"Georgia",align:"center"});
+  s.addText("Structure Segmentation", {x:0.7,y:1.85,w:11,h:1.0, fontSize:46,color:C.copperLt,bold:true,fontFace:"Georgia",align:"center"});
+  s.addText("Neden çoklu algoritma, neden iki seviye fusion, neden dağıtık mimari?", {
+    x:1,y:3.0,w:11.3,h:0.55, fontSize:14,color:C.grayLt,fontFace:"Calibri",align:"center",
+  });
+  s.addText("Capstone Final Presentation  •  Spring 2026", {
+    x:1,y:3.62,w:11.3,h:0.4, fontSize:12,color:C.gray,fontFace:"Calibri",align:"center",
   });
 
-  const guards = [
-    ["Guard 1", "Fusion not requested → skip", C.teal],
-    ["Guard 2", "Fusion result already received → skip (no duplicate dispatch)", C.green],
-    ["Guard 3", "fusion__dispatched flag already set → skip", C.amber],
-    ["Condition", "All 4 baselines resolved (completed OR failed) → check success count", C.copper],
-    ["Success ≥ 2", "Dispatch fusion worker with available algorithm_results payload", C.green],
-    ["Success < 2", "Produce failed fusion result directly — no worker needed", "9B1C1C"],
-  ];
-
-  guards.forEach(([label, desc, color], i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const x = 0.3 + col * 6.55;
-    const y = 4.05 + row * 0.88;
+  const ps = ["Presenter 1","Presenter 2","Presenter 3"];
+  const pc = [C.copper, C.teal, C.green];
+  ps.forEach((p,i) => {
     s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y, w: 1.5, h: 0.65,
-      fill: { color }, line: { color }, rounding: 0.08,
+      x:2.4+i*3.2, y:4.9, w:2.8, h:0.4,
+      fill:{color:pc[i]}, line:{color:pc[i]}, rounding:0.1,
     });
-    s.addText(label, {
-      x, y, w: 1.5, h: 0.65,
-      fontSize: 9, color: C.white, bold: true,
-      align: "center", valign: "middle",
-    });
-    s.addText(desc, {
-      x: x + 1.58, y, w: 4.8, h: 0.65,
-      fontSize: 10, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "middle",
-    });
+    s.addText(p, {x:2.4+i*3.2,y:4.9,w:2.8,h:0.4, fontSize:12,color:C.white,bold:true,align:"center",valign:"middle",margin:0});
+  });
+  badge(s,1);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 2 — SUNUM HİKAYESİ (neden bu sırayla anlatıyoruz?)
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Sunumun Mantığı", "Her bölüm bir öncekinin sorusunu cevaplayacak");
+  badge(s,2);
+
+  const chain = [
+    {num:"01", q:"Problem nedir?", a:"Müzik yapısındaki geçiş noktaları nasıl bulunur?", color:C.copper},
+    {num:"02", q:"Neden zor?", a:"Tek bir sinyal her geçişi göremez — çok boyutlu kanıt gerekli", color:C.teal},
+    {num:"03", q:"Nasıl bir sistem?", a:"Dağıtık, asenkron, her algoritma bağımsız çalışır", color:C.green},
+    {num:"04", q:"Tek algoritma yeterli değil mi?", a:"Custom pipeline içinde 6 sinyal birleşiyor: feature-level fusion", color:C.amber},
+    {num:"05", q:"Bir pipeline hâlâ yetmez mi?", a:"Farklı algoritmaların hatalarını dengelemek için algorithm-level fusion", color:C.purple},
+    {num:"06", q:"Sonuç doğru mu nasıl biliriz?", a:"SALAMI anotasyonlarıyla iki farklı toleransta ölçüm", color:C.navy},
+  ];
+
+  chain.forEach(({num,q,a,color},i) => {
+    const col = i % 2;
+    const row = Math.floor(i/2);
+    const x = 0.3 + col*6.55;
+    const y = 1.45 + row*1.9;
+
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:1.7, fill:{color:C.white}, line:{color:C.grayLt},
+      shadow:{type:"outer",color:"000000",blur:4,offset:1,angle:135,opacity:0.07}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:0.07,h:1.7, fill:{color}, line:{color}});
+    s.addText(num, {x:x+0.2,y:y+0.08,w:0.6,h:0.6, fontSize:22,color,bold:true,fontFace:"Georgia",align:"center",margin:0});
+    s.addText("SORU: "+q, {x:x+0.85,y:y+0.1,w:5.1,h:0.42, fontSize:12,color:C.navy,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText("CEVAP: "+a, {x:x+0.85,y:y+0.58,w:5.1,h:0.95, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top",margin:0});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 3 — PROBLEM: SINIR TESPİTİ NE DEMEKTİR?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Problem: Boundary Detection", "Müzikal yapı değişimlerinin tam zamanını bulmak");
+  badge(s,3);
+
+  // Timeline
+  const segs = [
+    {label:"Intro",color:C.copper,w:2.0},
+    {label:"Verse",color:C.teal,w:2.7},
+    {label:"Chorus",color:C.green,w:2.4},
+    {label:"Verse",color:C.teal,w:2.4},
+    {label:"Chorus",color:C.green,w:2.4},
+    {label:"Outro",color:C.amber,w:1.3},
+  ];
+  let cx = 0.3;
+  segs.forEach(({label,color,w}) => {
+    s.addShape(pres.shapes.RECTANGLE, {x:cx,y:1.45,w,h:0.85, fill:{color}, line:{color}});
+    s.addText(label, {x:cx,y:1.45,w,h:0.85, fontSize:12,color:C.white,bold:true,align:"center",valign:"middle"});
+    cx += w;
+  });
+  // boundary arrows
+  const bx = [2.3, 5.0, 7.4, 9.8];
+  bx.forEach(x => {
+    s.addShape(pres.shapes.RECTANGLE, {x:x+0.3,y:1.2,w:0.04,h:1.35, fill:{color:"DC2626"}, line:{color:"DC2626"}});
+    s.addText("◀ boundary", {x:x,y:2.6,w:1.0,h:0.25, fontSize:8,color:"DC2626",align:"center"});
   });
 
+  // Three key clarifications
+  const points = [
+    {icon:"🎯",title:"Primary task: boundary, NOT label",
+     body:"Bilgisayar için ilk adım section ismi koymak değil, geçişin gerçekleştiği saniyeyi bulmaktır. Label bu karardan sonra gelir.",color:C.copper},
+    {icon:"📏",title:"Segment = iki boundary arasındaki aralık",
+     body:"Bir boundary bulununca komşu boundary ile birleşerek segment oluşur. Segment sayısı boundary sayısına bağlıdır.",color:C.teal},
+    {icon:"⚖️",title:"Fazla boundary da az boundary da hata",
+     body:"Over-segmentation: gereksiz fazla kesim → precision düşer. Under-segmentation: geçiş kaçırılır → recall düşer.",color:C.green},
+  ];
+  points.forEach(({icon,title,body,color},i) => {
+    const x = 0.3 + i*4.35;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x,y:3.05,w:4.05,h:3.55,
+      fill:{color:C.white}, line:{color:C.grayLt},
+      shadow:{type:"outer",color:"000000",blur:5,offset:1,angle:135,opacity:0.07}, rounding:0.08});
+    s.addShape(pres.shapes.RECTANGLE, {x,y:3.05,w:4.05,h:0.06, fill:{color}, line:{color}});
+    s.addText(icon, {x:x+0.15,y:3.15,w:0.55,h:0.55, fontSize:24,align:"center",valign:"middle"});
+    s.addText(title, {x:x+0.75,y:3.15,w:3.15,h:0.55, fontSize:12,color,bold:true,fontFace:"Georgia",align:"left",valign:"middle"});
+    s.addText(body, {x:x+0.15,y:3.78,w:3.75,h:2.7, fontSize:12,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 4 — NEDEN ZOR? (tek sinyal neden yetmez)
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Neden Zor? — Tek Sinyal Yetmez", "Her müzikal geçiş farklı bir akustik kanıt bırakır");
+  badge(s,4);
+
+  // Central insight
   s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 0.3, y: 6.75, w: 12.7, h: 0.4,
-    fill: { color: "FFF7ED" }, line: { color: C.amber }, rounding: 0.05,
+    x:0.3,y:1.42,w:12.7,h:0.75,
+    fill:{color:"EFF6FF"}, line:{color:C.teal}, rounding:0.07,
   });
-  s.addText("resolved = worker responded (completed or failed)  •  successful = completed with non-empty segments", {
-    x: 0.5, y: 6.75, w: 12.3, h: 0.4,
-    fontSize: 10, color: C.amber, bold: true, fontFace: "Calibri",
-    align: "center", valign: "middle",
-  });
-}
-
-// ─── SLIDE 16: WEIGHTED VOTING ───────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Algorithm-Level Weighted Voting", "How fusion decides which boundaries survive");
-  presenterBadge(s, 16);
-  slideNumLabel(s, 16);
-
-  // Weights table
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.3, y: 1.42, w: 4.0, h: 0.4,
-    fill: { color: C.navy }, line: { color: C.navy },
-  });
-  s.addText("Default Algorithm Weights", {
-    x: 0.3, y: 1.42, w: 4.0, h: 0.4,
-    fontSize: 12, color: C.white, bold: true, fontFace: "Georgia",
-    align: "center", valign: "middle",
-  });
-  const weightData = [
-    ["custom_librosa", "0.35", C.copper],
-    ["scluster", "0.30", C.green],
-    ["cnmf", "0.20", C.teal],
-    ["foote", "0.15", "5B21B6"],
-  ];
-  weightData.forEach(([alg, w, color], i) => {
-    const y = 1.85 + i * 0.68;
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: 0.3, y, w: 4.0, h: 0.58,
-      fill: { color: i % 2 === 0 ? C.white : "F8FAFC" },
-      line: { color: C.grayLt },
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: 0.32, y: y + 0.08, w: parseFloat(w) * 8, h: 0.4,
-      fill: { color }, line: { color },
-    });
-    s.addText(`${alg}  ${w}`, {
-      x: 0.42, y, w: 3.8, h: 0.58,
-      fontSize: 11, color: C.white, bold: true, fontFace: "Calibri",
-      align: "left", valign: "middle",
-    });
+  s.addText("Temel çelişki: Verse → Chorus geçişinde bazen enerji yükselir, bazen akort değişir, bazen sadece davul girer — hiçbiri her zaman olmaz.", {
+    x:0.5,y:1.42,w:12.3,h:0.75, fontSize:13,color:C.navy,fontFace:"Calibri",align:"center",valign:"middle",
   });
 
-  // Steps
-  const steps = [
-    "Collect all internal boundary votes from each algorithm result",
-    "Remove start (≤0.5 s) and end-edge boundaries from voting",
-    "Group votes within merge_window_seconds = 2.5 s into boundary groups",
-    "Per group: each algorithm contributes at most ONE vote (highest confidence)",
-    "Compute: score = Σ(algorithm_weight × boundary_confidence)",
-    "Accept if: score ≥ threshold (0.45) OR unique_algorithm_count ≥ required_vote_count (2)",
+  const examples = [
+    {signal:"Sadece RMS (enerji)",problem:"Verse'ten Chorus'a geçişte enerji artabilir ama acoustic guitar'lı iki verse arasında artmaz",verdict:"YETERSİZ",color:C.red},
+    {signal:"Sadece Chroma (armoni)",problem:"Aynı chord progression'a sahip iki farklı section harmonik olarak aynı görünür",verdict:"YETERSİZ",color:C.red},
+    {signal:"Sadece Onset (vuruş)",problem:"Drum pattern içinde yüzlerce onset var; section boundary'den çok nota başlangıçlarını gösterir",verdict:"YETERSİZ",color:C.red},
+    {signal:"SSM (öz-benzerlik matrisi)",problem:"Tekrar eden Chorus'ları yakalayabilir ama timestamp kesinliği frame çözünürlüğüne bağlıdır",verdict:"GÜÇLÜ ama TEK BAŞINA EKSİK",color:C.amber},
   ];
 
-  s.addText("Voting Steps", {
-    x: 4.6, y: 1.42, w: 8.4, h: 0.38,
-    fontSize: 13, color: C.navy, bold: true, fontFace: "Georgia", align: "left",
-  });
-  steps.forEach((step, i) => {
-    s.addShape(pres.shapes.OVAL, {
-      x: 4.6, y: 1.88 + i * 0.7, w: 0.28, h: 0.28,
-      fill: { color: C.copper }, line: { color: C.copper },
-    });
-    s.addText(step, {
-      x: 4.98, y: 1.85 + i * 0.7, w: 8.0, h: 0.62,
-      fontSize: 11, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "middle",
-    });
+  examples.forEach(({signal,problem,verdict,color},i) => {
+    const col = i % 2;
+    const row = Math.floor(i/2);
+    const x = 0.3 + col*6.55;
+    const y = 2.38 + row*2.2;
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:2.0, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:0.45, fill:{color:C.navyMid}, line:{color:C.navyMid}});
+    s.addText("📊 "+signal, {x:x+0.1,y,w:5.9,h:0.45, fontSize:12,color:C.white,bold:true,fontFace:"Georgia",align:"left",valign:"middle"});
+    s.addText(problem, {x:x+0.1,y:y+0.5,w:5.9,h:1.0, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:x+0.1,y:y+1.58,w:5.9,h:0.32, fill:{color}, line:{color}, rounding:0.05});
+    s.addText("→ "+verdict, {x:x+0.1,y:y+1.58,w:5.9,h:0.32, fontSize:10,color:C.white,bold:true,align:"center",valign:"middle",margin:0});
   });
 
-  // Numeric example box
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.3, y: 4.6, w: 12.7, h: 0.4,
-    fill: { color: C.navyMid }, line: { color: C.navyMid },
-  });
-  s.addText("Numeric Example", {
-    x: 0.3, y: 4.6, w: 12.7, h: 0.4,
-    fontSize: 12, color: C.white, bold: true, fontFace: "Georgia",
-    align: "center", valign: "middle",
-  });
-  codeBox(s, `Group at ~60 s:
-  custom_librosa: time=60.2 s, confidence=0.90  →  0.35 × 0.90 = 0.315
-  scluster:       time=61.0 s, confidence=0.80  →  0.30 × 0.80 = 0.240
-  ──────────────────────────────────────────────────────────────────────
-  group_score = 0.315 + 0.240 = 0.555     threshold = 0.45   →   ACCEPTED ✓
-  anchor_strategy=custom_snap  →  fused_time = 60.2 s  (custom's snapped timestamp)`, 0.3, 5.05, 12.7, 2.1);
+  quoteBar(s,"Sonuç: birden fazla sinyali birleştirmezsek, her genre'da güvenilir bir sistem kuramayız", 6.72);
 }
 
-// ─── SLIDE 17: DIAGNOSTICS & FAILURE ────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 5 — NEDEN DAĞITIK MİMARİ? (design decision)
+// ════════════════════════════════════════════════════════════════════════════
 {
   const s = pres.addSlide();
-  headerBar(s, "Fusion Diagnostics & Failure Handling", "Explainability is built into every boundary decision");
-  presenterBadge(s, 17);
-  slideNumLabel(s, 17);
+  header(s, "Neden Dağıtık Mimari Seçtik?", "DSP hesaplama HTTP isteğini bloke etmemeli");
+  badge(s,5);
 
-  // Left: diagnostics JSON
-  codeBox(s, `// Each fused boundary carries full decision trace:
-{
-  "time": 60.2,
-  "confidence": 0.555,
-  "source": "algorithm_fusion",
-  "sources": ["custom_librosa", "scluster"],
-  "metadata": {
-    "score": 0.555,
-    "raw_times": [
-      { "algorithm": "custom_librosa",
-        "time": 60.2, "confidence": 0.90 },
-      { "algorithm": "scluster",
-        "time": 61.0, "confidence": 0.80 }
+  vsBox(s,
+    "❌ Monolitik Yaklaşım (API içinde hesapla)",
+    [
+      "HTTP request, 4 algoritmanın bitmesini bekler",
+      "Bir algoritma yavaşlarsa tüm kullanıcı bloke olur",
+      "Algoritma eklemek API'yi doğrudan değiştirir",
+      "Paralel çalışma zor — thread blocking riski",
+      "Scale etmek için tüm servisi büyütmek gerekir",
     ],
-    "accepted": true,
-    "fused_time": 60.2
-  }
-}`, 0.3, 1.42, 5.8, 5.55);
+    "✓ Dağıtık Worker Yaklaşımı (seçtiğimiz)",
+    [
+      "API sadece task kaydeder ve mesaj yayınlar",
+      "Algoritmalar birbirinden bağımsız, paralel çalışır",
+      "Yeni algoritma = yeni worker, API değişmez",
+      "Her worker ayrı scale edilebilir",
+      "Bir worker crash olsa diğerleri sonuç üretir",
+    ],
+    0.3, 1.42, 12.7, 4.2, C.red, C.green
+  );
 
-  // Right: failure handling
-  s.addText("Failure Handling", {
-    x: 6.5, y: 1.42, w: 6.5, h: 0.38,
-    fontSize: 14, color: C.navy, bold: true, fontFace: "Georgia", align: "left",
-  });
+  // Why RabbitMQ specifically
+  s.addShape(pres.shapes.RECTANGLE, {x:0.3,y:5.82,w:12.7,h:0.45, fill:{color:C.navyMid}, line:{color:C.navyMid}});
+  s.addText("RabbitMQ'yu Neden Seçtik?", {x:0.3,y:5.82,w:12.7,h:0.45, fontSize:13,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle"});
 
-  const cases = [
-    { title: "Worker Exception", desc: "BaseWorker catches exception, publishes a failed normalized result — marks algorithm as resolved-but-failed", color: "9B1C1C" },
-    { title: "< 2 Successful Results", desc: "ResultListener generates a failed fusion result directly without dispatching the fusion worker", color: C.amber },
-    { title: "Rejected Boundary Group", desc: "Group score below threshold AND vote count insufficient → logged in diagnostics as rejected, not returned", color: C.teal },
-    { title: "Worker Disappears (Known Limit)", desc: "If a worker dies without publishing any result, _maybe_dispatch_fusion() never sees all 4 resolved → task stays in processing. Watchdog/timeout needed (future work).", color: C.copper },
+  const mq = [
+    ["Topic Exchange", "Her algoritma kendi routing key'ine bağlı — tek mesaj birden fazla worker'a gitmez"],
+    ["ACK mekanizması", "Worker mesajı işleyene kadar queue'da tutar; crash olursa tekrar teslim edilir"],
+    ["Servis izolasyonu", "Backend ve worker'lar birbirini doğrudan çağırmaz — birinin durması diğerini etkilemez"],
+    ["Tek sonuç kanalı", "Tüm worker'lar segmentation.result'a yazar — ResultListener tek noktada toplar"],
   ];
-
-  cases.forEach(({ title, desc, color }, i) => {
-    const y = 1.9 + i * 1.38;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x: 6.5, y, w: 6.5, h: 1.2,
-      fill: { color: C.white }, line: { color: C.grayLt },
-      shadow: { type: "outer", color: "000000", blur: 4, offset: 1, angle: 135, opacity: 0.07 },
-      rounding: 0.07,
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: 6.5, y, w: 0.06, h: 1.2,
-      fill: { color }, line: { color },
-    });
-    s.addText(title, {
-      x: 6.65, y: y + 0.1, w: 6.2, h: 0.35,
-      fontSize: 12, color, bold: true, fontFace: "Georgia",
-      align: "left", valign: "middle",
-    });
-    s.addText(desc, {
-      x: 6.65, y: y + 0.48, w: 6.2, h: 0.65,
-      fontSize: 10, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top",
-    });
+  mq.forEach(([title,desc],i) => {
+    const col = i%2, row = Math.floor(i/2);
+    const x = 0.3+col*6.55, y = 6.38+row*0.58;
+    s.addText("▸ "+title+":", {x,y,w:2.2,h:0.5, fontSize:10,color:C.copperLt,bold:true,fontFace:"Calibri",align:"left",valign:"middle"});
+    s.addText(desc, {x:x+2.2,y,w:4.2,h:0.5, fontSize:10,color:C.grayLt,fontFace:"Calibri",align:"left",valign:"middle"});
   });
 }
 
-// ─── SLIDE 18: STRUCTURAL vs SEMANTIC LABELS ─────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 6 — BİR REQUEST NASIL İLERLER? (sırayı neden böyle kurguladık)
+// ════════════════════════════════════════════════════════════════════════════
 {
   const s = pres.addSlide();
-  headerBar(s, "Structural vs Semantic Labeling", "Two-layer approach: similarity claim vs musical role claim");
-  presenterBadge(s, 18);
-  slideNumLabel(s, 18);
+  header(s, "Bir İstek Sistemde Nasıl İlerler?", "Her adımın sırası bilinçli bir tasarım kararıdır");
+  badge(s,6);
 
-  // Example timeline
-  const exSegs = [
-    { label: "Struct: A\nSemantic: Intro", color: C.copper },
-    { label: "Struct: B\nSemantic: Verse", color: C.teal },
-    { label: "Struct: C\nSemantic: Chorus", color: C.green },
-    { label: "Struct: B\nSemantic: Verse", color: C.teal },
-    { label: "Struct: C\nSemantic: Chorus", color: C.green },
-    { label: "Struct: D\nSemantic: Bridge", color: C.amber },
-    { label: "Struct: A\nSemantic: Outro", color: C.copper },
+  const steps = [
+    {n:"1",title:"Validation önce gelir",reason:"Hatalı parametre worker'a kadar gidip geç hata vermemeli — API katmanında Pydantic şemalarıyla engellenir.",color:C.copper},
+    {n:"2",title:"Task önce DB'ye yazılır, sonra publish edilir",reason:"Worker çok hızlı yanıt verse bile ResultListener'ın bulabileceği bir kayıt olsun. Yayın öncesi kayıt garantisi.",color:C.teal},
+    {n:"3",title:"Fusion hemen dispatch edilmez",reason:"Fusion worker'ının işleyebilmesi için önce 4 base algoritma sonucu gerekir. Orchestrator fusion'ı 'expected' listesine ekler ama 'dispatch' etmez.",color:C.green},
+    {n:"4",title:"Worker'lar paralel çalışır",reason:"RabbitMQ her algoritmaya ayrı routing key ile mesaj iletir. custom_librosa, Foote, CNMF, SCluster birbirini beklemez.",color:C.amber},
+    {n:"5",title:"Sonuçlar normalize edilir — anında değil, gelince",reason:"ResultListener her sonucu alınca normalize eder ve DB'ye yazar. Frontend partial sonuçları SSE ile anlık görebilir.",color:C.purple},
+    {n:"6",title:"Fusion ancak tüm base'ler tamamlanınca başlar",reason:"_maybe_dispatch_fusion() 4 baseline'ın tamamını bekler. Bu, yarım bilgiyle fusion yapılmasını önler.",color:C.navy},
   ];
 
-  exSegs.forEach(({ label, color }, i) => {
-    const segW = 13.3 / exSegs.length;
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: i * segW, y: 1.42, w: segW - 0.04, h: 1.1,
-      fill: { color }, line: { color },
-    });
-    s.addText(label, {
-      x: i * segW, y: 1.42, w: segW - 0.04, h: 1.1,
-      fontSize: 9, color: C.white, bold: true, fontFace: "Calibri",
-      align: "center", valign: "middle",
-    });
+  steps.forEach(({n,title,reason,color},i) => {
+    const col = i%2, row = Math.floor(i/2);
+    const x = 0.3+col*6.55, y = 1.45+row*1.92;
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:1.75, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:x+0.08,y:y+0.1,w:0.48,h:0.48, fill:{color}, line:{color}, rounding:0.08});
+    s.addText(n, {x:x+0.08,y:y+0.1,w:0.48,h:0.48, fontSize:14,color:C.white,bold:true,align:"center",valign:"middle",margin:0});
+    s.addText(title, {x:x+0.65,y:y+0.1,w:5.3,h:0.42, fontSize:12,color:C.navy,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText(reason, {x:x+0.1,y:y+0.62,w:5.9,h:1.05, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
   });
+}
 
-  // Two columns explanation
-  infoCard(s, "Structural Label (A/B/C)", [
-    "Based on audio descriptor similarity (Chroma, MFCC, RMS, onset density)",
-    "Agglomerative clustering; best silhouette score selects k",
-    "A = most frequent cluster, B = second, etc.",
-    "Does NOT imply Verse/Chorus — only similarity",
-    "This is the reliable, scientifically defensible layer",
-  ], 0.3, 2.75, 6.1, 3.25, C.copper);
-
-  infoCard(s, "Semantic Label (Intro/Verse/Chorus…)", [
-    "Heuristic inference layer — weaker claim",
-    "Intro: first non-silence segment in early 20% of track",
-    "Outro: last non-silence in final 25%",
-    "Chorus: repeated cluster with higher RMS energy",
-    "Verse: other repeated clusters",
-    "Bridge: unique, middle, long-enough segment",
-    "Does NOT overwrite structural label",
-  ], 6.6, 2.75, 6.4, 3.25, C.teal);
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 7 — NEDEN ORTAK ŞEMA? (common result schema)
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Neden Ortak Sonuç Şeması?", "Farklı algoritmalar aynı dili konuşmalı ki fusion mümkün olsun");
+  badge(s,7);
 
   s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 0.3, y: 6.22, w: 12.7, h: 0.46,
-    fill: { color: "FFF8F0" }, line: { color: C.copper }, rounding: 0.05,
+    x:0.3,y:1.42,w:12.7,h:0.8,
+    fill:{color:"FFF7ED"}, line:{color:C.amber}, rounding:0.07,
   });
-  s.addText("Semantic labels are heuristic — confidence & reason fields are always stored so the strength of the claim is transparent", {
-    x: 0.5, y: 6.22, w: 12.3, h: 0.46,
-    fontSize: 11, color: C.amber, bold: true, fontFace: "Calibri",
-    align: "center", valign: "middle",
-  });
-}
-
-// ─── SLIDE 19: EVALUATION ───────────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Evaluation with SALAMI Dataset", "Measuring boundary detection quality at two tolerance levels");
-  presenterBadge(s, 19);
-  slideNumLabel(s, 19);
-
-  // Dataset info
-  infoCard(s, "SALAMI Dataset", [
-    "Human-annotated structural intervals for music tracks",
-    "Multiple annotators per track → annotation uncertainty is real",
-    "Used as reference for boundary detection evaluation",
-    "Evaluation uses mir_eval.segment.detection(trim=True)",
-  ], 0.3, 1.42, 5.8, 2.3, C.navy);
-
-  // Metrics explanation
-  infoCard(s, "Evaluation Metrics", [
-    "Precision = TP / (TP + FP)  — how many predicted boundaries are correct?",
-    "Recall = TP / (TP + FN)  — how many ground-truth boundaries were found?",
-    "F1 = 2 × P × R / (P + R)  — harmonic mean, penalizes imbalance",
-    "over-segmentation → low Precision;  under-segmentation → low Recall",
-  ], 0.3, 3.92, 5.8, 2.65, C.teal);
-
-  // Tolerances column
-  s.addText("Two Tolerance Windows", {
-    x: 6.5, y: 1.42, w: 6.5, h: 0.38,
-    fontSize: 14, color: C.navy, bold: true, fontFace: "Georgia",
+  s.addText("Şema olmadan ne olurdu?  Fusion servisi her algoritma için ayrı bir parser yazmak zorunda kalırdı. custom_librosa'nın çıktısı, Foote'un çıktısı, CNMF'in çıktısı — hepsi farklı format. Yeni algoritma eklemek fusion'ı kırar.", {
+    x:0.5,y:1.42,w:12.3,h:0.8, fontSize:12,color:C.amber,fontFace:"Calibri",align:"left",valign:"middle",
   });
 
-  const tols = [
-    { tol: "±0.5 s", label: "Strict", desc: "Tests exact timestamp localization. Low F1@0.5 means algorithm finds the right region but is imprecise about when.", color: C.copper },
-    { tol: "±3.0 s", label: "Lenient", desc: "Tests whether the correct structural region is detected. High F1@3.0 but low F1@0.5 suggests good region detection, weak timing.", color: C.teal },
-  ];
+  reasonCard(s, 0.3, 2.42, 4.0, 4.95,
+    "Her algoritma farklı raw format üretiyor (Foote: sadece boundary zamanları, CNMF: label'lı segment listesi, custom: feature metadata ile)",
+    "AlgorithmResult şeması: task_id, status, worker_type, algorithm, duration, boundaries[], segments[], diagnostics{}",
+    "Fusion ve evaluation hiçbir zaman algoritma-specific kod çalıştırmaz. Yeni bir worker yazmak şemaya uymaktan ibaretti.",
+    C.copper
+  );
 
-  tols.forEach(({ tol, label, desc, color }, i) => {
-    const y = 1.95 + i * 2.2;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x: 6.5, y, w: 6.5, h: 2.0,
-      fill: { color: C.white }, line: { color: C.grayLt },
-      shadow: { type: "outer", color: "000000", blur: 4, offset: 1, angle: 135, opacity: 0.07 },
-      rounding: 0.08,
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x: 6.5, y, w: 6.5, h: 0.5,
-      fill: { color }, line: { color },
-    });
-    s.addText(`${tol}  —  ${label}`, {
-      x: 6.5, y, w: 6.5, h: 0.5,
-      fontSize: 16, color: C.white, bold: true, fontFace: "Georgia",
-      align: "center", valign: "middle",
-    });
-    s.addText(desc, {
-      x: 6.65, y: y + 0.58, w: 6.2, h: 1.35,
-      fontSize: 12, color: C.slate, fontFace: "Calibri",
-      align: "left", valign: "top",
-    });
-  });
+  reasonCard(s, 4.5, 2.42, 4.0, 4.95,
+    "Structural label 'A' mı Verse mı? MSAF'ın raw label'ı 'Verse' diye isimlendiriyordu. Bu iddia çok güçlü.",
+    "İki katman ayrıldı: structural_label (A/B/C — benzerlik iddiası) ve semantic_label (Intro/Verse/Chorus — müzikal rol iddiası)",
+    "Sistem bilmediği şeyi biliyormuş gibi göstermiyor. Her label'a confidence ve reason da eklendi.",
+    C.teal
+  );
 
-  // Metrics table placeholder
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.3, y: 6.68, w: 12.7, h: 0.4,
-    fill: { color: "F0FDF4" }, line: { color: C.green },
-  });
-  s.addText("Batch evaluation runs across all SALAMI tracks with concurrency — averages P / R / F1 per algorithm for rigorous comparison", {
-    x: 0.5, y: 6.68, w: 12.3, h: 0.4,
-    fontSize: 10, color: C.green, bold: true, fontFace: "Calibri",
-    align: "center", valign: "middle",
-  });
-}
-
-// ─── SLIDE 20: CONCLUSION ───────────────────────────────────────────────────
-{
-  const s = pres.addSlide();
-  headerBar(s, "Contributions, Limitations & Future Work", "What we built, what we learned, and where it can go");
-  presenterBadge(s, 20);
-  slideNumLabel(s, 20);
-
-  const cols = [
-    {
-      title: "Contributions",
-      icon: "✓",
-      color: C.green,
-      items: [
-        "Distributed multi-algorithm pipeline with RabbitMQ",
-        "Common AlgorithmResult schema for interoperability",
-        "Feature-level fusion inside custom_librosa (6 sources)",
-        "Algorithm-level weighted voting fusion worker",
-        "SALAMI-based multi-tolerance evaluation (0.5 s / 3.0 s)",
-        "Full decision diagnostics for explainability",
-        "Structural / semantic two-layer labeling separation",
-      ],
-    },
-    {
-      title: "Limitations",
-      icon: "⚠",
-      color: C.amber,
-      items: [
-        "Confidence values not fully calibrated across algorithms",
-        "Fusion weights are static — not learned from data",
-        "No watchdog / timeout for disappeared workers",
-        "Semantic labels are heuristic — not benchmark-validated",
-        "anchor_strategy schema/service default mismatch",
-        "Genre-specific minimum segment duration not tuned",
-      ],
-    },
-    {
-      title: "Future Work",
-      icon: "→",
-      color: C.teal,
-      items: [
-        "Dataset-based automatic weight optimization",
-        "Learned confidence calibration per algorithm",
-        "Genre-adaptive fusion weights",
-        "Periodic watchdog + dead-letter queue + retry",
-        "Learned meta-classifier for boundary groups",
-        "Richer frontend: vote timeline visualization",
-        "New algorithm workers via existing worker interface",
-      ],
-    },
-  ];
-
-  cols.forEach(({ title, icon, color, items }, i) => {
-    const x = 0.3 + i * 4.35;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x, y: 1.42, w: 4.05, h: 5.95,
-      fill: { color: C.white }, line: { color: C.grayLt },
-      shadow: { type: "outer", color: "000000", blur: 5, offset: 1, angle: 135, opacity: 0.08 },
-      rounding: 0.1,
-    });
-    s.addShape(pres.shapes.RECTANGLE, {
-      x, y: 1.42, w: 4.05, h: 0.6,
-      fill: { color }, line: { color },
-    });
-    s.addText(`${icon}  ${title}`, {
-      x, y: 1.42, w: 4.05, h: 0.6,
-      fontSize: 14, color: C.white, bold: true, fontFace: "Georgia",
-      align: "center", valign: "middle",
-    });
-    const richItems = [];
-    items.forEach((item, j) => {
-      richItems.push({
-        text: item,
-        options: {
-          bullet: true,
-          breakLine: j < items.length - 1,
-          fontSize: 10.5,
-          color: C.slate,
-          fontFace: "Calibri",
-        },
-      });
-    });
-    s.addText(richItems, {
-      x: x + 0.15, y: 2.1, w: 3.75, h: 5.15,
-      valign: "top", margin: [4, 6, 4, 6],
-    });
-  });
-
-  // Closing statement
-  s.addShape(pres.shapes.RECTANGLE, {
-    x: 0, y: 7.35, w: 13.3, h: 0.4,
-    fill: { color: C.navy }, line: { color: C.navy },
-  });
-  s.addText(
-    "\"The contribution is not one new algorithm — it is the integration of multi-feature and multi-algorithm decisions into a distributed, explainable, evaluable system.\"",
-    {
-      x: 0.3, y: 7.35, w: 12.7, h: 0.4,
-      fontSize: 9.5, color: C.copperLt, fontFace: "Calibri",
-      align: "center", valign: "middle",
-    }
+  reasonCard(s, 8.7, 2.42, 4.3, 4.95,
+    "ResultListener her sonucu aldığında hem frontend'e göstermek hem de fusion'a vermek zorunda — iki farklı ihtiyaç",
+    "results[algo] → segment listesi (frontend için). results[algo__result] → full normalized result (fusion için). results[algo__diagnostics] → açıklanabilirlik için.",
+    "Eski frontend bozulmadan yeni fusion sistemi çalışabildi. Geriye dönük uyumluluk ve genişletilebilirlik aynı anda sağlandı.",
+    C.green
   );
 }
 
-// ─── WRITE FILE ──────────────────────────────────────────────────────────────
-pres.writeFile({ fileName: "docs/MusicSegmentation_FinalPresentation.pptx" })
-  .then(() => console.log("✅  Presentation created: docs/MusicSegmentation_FinalPresentation.pptx"))
-  .catch((err) => { console.error("❌  Error:", err); process.exit(1); });
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 8 — SECTION DIVIDER
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  divider(s, "Segmentasyon Algoritmaları", "Neden bu 4 algoritmayı seçtik ve neden birlikte çalışıyorlar?");
+  badge(s,8);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 9 — CUSTOM LİBROSA: NEDEN MULTI-FEATURE?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Custom Librosa Pipeline — Neden Multi-Feature?", "Her sinyal farklı bir geçiş tipini görür");
+  badge(s,9);
+
+  s.addText("Pipeline'ı bu sırayla kurguladık:", {
+    x:0.3,y:1.42,w:5,h:0.35, fontSize:12,color:C.navy,bold:true,fontFace:"Georgia",align:"left",
+  });
+
+  flowRow(s, [
+    {label:"Ses Yükle\n(ffmpeg\nmono 22050Hz)",color:C.slate},
+    {label:"Aktif Bölge\nBul\n(sessizliği kırp)",color:C.teal},
+    {label:"Özellik\nÇıkar\n(Chroma+MFCC)",color:C.green},
+    {label:"SSM Kur\n(her frame'i\nherkesle karşılaştır)",color:C.copper},
+    {label:"Aday\nÜret\n(6 sinyal)",color:C.amber},
+    {label:"Birleştir\n(feature fusion\n+ snapping)",color:C.purple},
+  ], 0.3, 1.9, 2.0, 1.6);
+
+  // Why each step in this order
+  const whys = [
+    {step:"1. Önce aktif bölge neden?",
+     why:"Sessizlik SSM hesaplarını ve segment süresi ölçümlerini bozar. Analizi müzikal içerikle sınırlandırıp son adımda zaman eksenini geri düzeltiyoruz.",color:C.teal},
+    {step:"2. SSM neden en ağır adım?",
+     why:"Her frame her frame ile karşılaştırılır (O(N²) işlem). Tekrarlanan Chorus'lar matriste parlak köşegen bloklar olarak görünür — bu yapısal bilgiyi başka hiçbir sinyal sağlayamaz.",color:C.copper},
+    {step:"3. 6 sinyal neden aynı anda?",
+     why:"RMS enerji değişimini, Chroma armonik değişimi, Onset vuruş yoğunluğunu, Beat ritmik hizalamayı, SSM yapısal tekrarı, Lyrics metin sınırlarını yakapar. Biri diğerini göremez.",color:C.green},
+    {step:"4. Snapping neden en son?",
+     why:"SSM doğru bölgeyi bulur ama timestamp biraz kayık olabilir. En son adımda güçlü bir onset veya beat'e yaslarız — yapısal detector 'nerede', onset 'tam ne zaman' sorusunu cevaplar.",color:C.amber},
+  ];
+
+  whys.forEach(({step,why,color},i) => {
+    const col = i%2, row = Math.floor(i/2);
+    const x = 0.3+col*6.55, y = 3.75+row*1.65;
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:1.5, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:0.06,h:1.5, fill:{color}, line:{color}});
+    s.addText(step, {x:x+0.18,y:y+0.08,w:5.8,h:0.38, fontSize:12,color,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText(why, {x:x+0.18,y:y+0.5,w:5.8,h:0.95, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top",margin:0});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 10 — SSM NEDEN MERKEZİ SİNYAL?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Self-Similarity Matrix — Neden Merkezi Sinyal?", "Tekrar bilgisi yalnızca SSM'de var");
+  badge(s,10);
+
+  // SSM concept visual (simplified grid)
+  s.addText("SSM'de ne görürüz?", {x:0.3,y:1.42,w:4,h:0.35, fontSize:13,color:C.navy,bold:true,fontFace:"Georgia"});
+
+  // Draw a simplified SSM grid
+  const gridSize = 8;
+  const cellSize = 0.46;
+  const gx = 0.3, gy = 1.88;
+  // Simulate a song: Intro(0-1), Verse(1-3), Chorus(3-5), Verse(5-7), Chorus(7-8)
+  const sectionOf = (i) => {
+    if (i < 1) return 0; // Intro
+    if (i < 3) return 1; // Verse
+    if (i < 5) return 2; // Chorus
+    if (i < 7) return 1; // Verse (same as 1)
+    return 2; // Chorus (same as 2)
+  };
+  const brightness = (r,c) => sectionOf(r) === sectionOf(c) ? "2D6A4F" : (r===c ? "1B2A4A" : "E2E8F0");
+  for (let r = 0; r < gridSize; r++) {
+    for (let c = 0; c < gridSize; c++) {
+      s.addShape(pres.shapes.RECTANGLE, {
+        x:gx+c*cellSize, y:gy+r*cellSize, w:cellSize-0.02, h:cellSize-0.02,
+        fill:{color:brightness(r,c)}, line:{color:"FFFFFF"},
+      });
+    }
+  }
+  const labels = ["Intro","Verse","Verse","Chorus","Chorus","Verse","Verse","Chorus"];
+  labels.forEach((l,i) => {
+    s.addText(l, {x:gx+i*cellSize+0.01,y:gy+gridSize*cellSize+0.04,w:cellSize,h:0.3, fontSize:6.5,color:C.slate,align:"center"});
+    s.addText(l, {x:gx-0.55,y:gy+i*cellSize,w:0.54,h:cellSize, fontSize:6.5,color:C.slate,align:"right",valign:"middle"});
+  });
+  s.addText("🟩 = benzer bölgeler (Verse-Verse, Chorus-Chorus)", {
+    x:gx,y:gy+gridSize*cellSize+0.42,w:gridSize*cellSize,h:0.35, fontSize:9,color:C.green,fontFace:"Calibri",align:"center",
+  });
+
+  // Right: Why SSM
+  const ssmPoints = [
+    {title:"Anlık değişim değil, yapısal tekrar",
+     body:"RMS veya onset anlık olayları ölçer. SSM ise 'bu parçanın farklı iki anı birbirine benziyor mu?' sorusunu sorar. Chorus'un 3. kez geldiğini yalnızca SSM fark edebilir.",color:C.copper},
+    {title:"Neden en yüksek ağırlık (0.42)?",
+     body:"Feature fusion'da SSM candidate'ı tek başına threshold'u geçebilir (confidence ≥ 0.5 yeterliyse). Diğer sinyaller destek sağlar; SSM olmadan gerçek section boundary'yi kaçırma riski çok yüksek.",color:C.green},
+    {title:"Transposition invariance neden var?",
+     body:"Aynı motif farklı tonda tekrar edebilir. 12 pitch shift deneyip en yüksek benzerliği alırız. Böylece key change olsa bile yapısal tekrar kaybolmaz.",color:C.teal},
+    {title:"Neden smoothing ve diagonal enhancement?",
+     body:"Ham SSM gürültülüdür. Diagonal boyunca smooth edip tempo değişkenliğini hesaba katarak tekrar yollarını güçlendiririz. Checkerboard kernel boundary'de en yüksek tepkiyi verir.",color:C.amber},
+  ];
+
+  ssmPoints.forEach(({title,body,color},i) => {
+    const y = 1.42 + i*1.55;
+    s.addShape(pres.shapes.RECTANGLE, {x:4.4,y,w:8.7,h:1.42, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.RECTANGLE, {x:4.4,y,w:0.06,h:1.42, fill:{color}, line:{color}});
+    s.addText(title, {x:4.58,y:y+0.08,w:8.4,h:0.38, fontSize:12,color,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText(body, {x:4.58,y:y+0.5,w:8.4,h:0.88, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top",margin:0});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 11 — MSAF BASELINE'LAR: NEDEN 3 FARKLI YÖNTEM?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "MSAF Baseline'ları — Neden 3 Farklı Yöntem?", "Farklı matematiksel varsayımlar, farklı hata profilleri");
+  badge(s,11);
+
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+    x:0.3,y:1.42,w:12.7,h:0.72,
+    fill:{color:"EFF6FF"}, line:{color:C.teal}, rounding:0.07,
+  });
+  s.addText("Fusion'ın değeri: aynı algoritmanın 4 parametreli versiyonunu birleştirmek değil, farklı matematiksel perspektiften gelen bağımsız görüşleri birleştirmek. Benzer hata profilleri fusion'ı anlamsız kılar.", {
+    x:0.5,y:1.42,w:12.3,h:0.72, fontSize:12,color:C.navy,fontFace:"Calibri",align:"left",valign:"middle",
+  });
+
+  const algos = [
+    {
+      name:"Foote",
+      math:"Local Novelty Detection",
+      perspective:"'Bu anda öncesine göre ne kadar değişim var?'",
+      strength:"Keskin, yerel geçişleri iyi yakalar. Hızlı ve açıklanabilir.",
+      weakness:"Davul fill gibi yapısal olmayan geçici ani değişimlere duyarlı.",
+      weight:"0.15 — yalnızca yerel sinyal, yapısal bilgi eksik",
+      color:"5B21B6",
+    },
+    {
+      name:"CNMF",
+      math:"Convex Non-negative Matrix Factorization",
+      perspective:"'Parçada gizli tekrar eden bileşenler hangileri?'",
+      strength:"Latent pattern'ları factorize eder — verinin zaten içindeki yapıyı çıkarır.",
+      weakness:"Factorization rank (k) seçimi sınır sayısını etkiler.",
+      weight:"0.20 — Foote'tan daha az yerel gürültüye duyarlı",
+      color:C.teal,
+    },
+    {
+      name:"SCluster",
+      math:"Spectral Clustering on Affinity Graph",
+      perspective:"'Tüm parçada global gruplar nasıl bölünüyor?'",
+      strength:"Yerel değil, global benzerlik yapısını kullanır. Tekrar eden section'ları cluster olarak yakalar.",
+      weakness:"Cluster sayısı parametresi segment granülaritesini belirler.",
+      weight:"0.30 — global yapı, custom'dan sonra ikinci en yüksek",
+      color:C.green,
+    },
+  ];
+
+  algos.forEach(({name,math,perspective,strength,weakness,weight,color},i) => {
+    const x = 0.3+i*4.35;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x,y:2.35,w:4.05,h:5.25,
+      fill:{color:C.white}, line:{color:C.grayLt},
+      shadow:{type:"outer",color:"000000",blur:5,offset:1,angle:135,opacity:0.07}, rounding:0.08});
+    s.addShape(pres.shapes.RECTANGLE, {x,y:2.35,w:4.05,h:0.55, fill:{color}, line:{color}});
+    s.addText(name, {x,y:2.35,w:4.05,h:0.55, fontSize:20,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle",margin:0});
+    s.addText(math, {x:x+0.12,y:2.97,w:3.81,h:0.38, fontSize:10,color,bold:true,fontFace:"Calibri",align:"center"});
+    s.addText("Bakış Açısı", {x:x+0.12,y:3.4,w:3.81,h:0.28, fontSize:9,color:C.gray,bold:true,fontFace:"Calibri"});
+    s.addText(perspective, {x:x+0.12,y:3.68,w:3.81,h:0.55, fontSize:11,color:C.navy,fontFace:"Calibri",italic:true});
+    s.addShape(pres.shapes.RECTANGLE, {x:x+0.12,y:4.28,w:3.81,h:0.01, fill:{color:C.grayLt}, line:{color:C.grayLt}});
+    s.addText("✓ "+strength, {x:x+0.12,y:4.32,w:3.81,h:0.85, fontSize:10,color:C.green,fontFace:"Calibri",valign:"top"});
+    s.addText("⚠ "+weakness, {x:x+0.12,y:5.22,w:3.81,h:0.75, fontSize:10,color:C.amber,fontFace:"Calibri",valign:"top"});
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:x+0.12,y:6.02,w:3.81,h:0.38, fill:{color}, line:{color}, rounding:0.05});
+    s.addText("Ağırlık: "+weight, {x:x+0.12,y:6.02,w:3.81,h:0.38, fontSize:9,color:C.white,bold:true,align:"center",valign:"middle",margin:0});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 12 — FEATURE-LEVEL FUSION: NEDEN VE NASIL KARAR VERİYOR?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Feature-Level Fusion — Neden Bu Formülü Seçtik?", "Oylamada kaynak çeşitliliğini ödüllendiriyoruz");
+  badge(s,12);
+
+  // Problem statement
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+    x:0.3,y:1.42,w:12.7,h:0.68,
+    fill:{color:"FFF8F0"}, line:{color:C.amber}, rounding:0.07,
+  });
+  s.addText("Sorun: 6 sinyal birden fazla 'candidate boundary' üretir ve bunlar birbirinden birkaç yüz milisaniye farklı olabilir. Hangisi gerçek?  —  Bağımsız kaynak sayısı arttıkça güven artar.", {
+    x:0.5,y:1.42,w:12.3,h:0.68, fontSize:12,color:C.amber,fontFace:"Calibri",align:"left",valign:"middle",
+  });
+
+  // 4 design decisions
+  const decisions = [
+    {
+      d:"Neden temporal gruplama?",
+      body:"SSM 30.8 s, RMS 31.5 s diyor. İkisi de aynı geçişi gördü — sadece farklı frame'de tespit etti. 2.75 s pencere içindeki adayları tek grup sayıyoruz.",
+      color:C.copper,
+    },
+    {
+      d:"Neden her kaynaktan tek oy?",
+      body:"SSM gürültülüyse aynı bölgede 10 peak üretebilir. Tek kaynaktan yalnızca en yüksek confidence'lı aday alınır. Böylece bir kaynak oylamayı domine edemez.",
+      color:C.teal,
+    },
+    {
+      d:"Neden sadece ağırlıklı toplam değil, agreement bonus?",
+      body:"Yalnızca SSM mi diyor? O zaman score = 0.42 × conf. Ama 3 bağımsız sinyal aynı noktayı gösteriyorsa bonus ekliyoruz (max 0.15). Consensus güvenilirliği artırır.",
+      color:C.green,
+    },
+    {
+      d:"Neden SSM tek başına kabul ediliyor?",
+      body:"SSM yapısal tekrar bilgisi taşıyan tek sinyaldir. Diğer sinyaller zayıfsa dahi güçlü bir SSM candidate'ını (conf ≥ 0.5) boundary olarak tutuyoruz. Yoksa gerçek section boundary'leri kaçırma riski çok yüksek.",
+      color:C.amber,
+    },
+  ];
+
+  decisions.forEach(({d,body,color},i) => {
+    const col=i%2, row=Math.floor(i/2);
+    const x=0.3+col*6.55, y=2.3+row*2.35;
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:2.2, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:0.07,h:2.2, fill:{color}, line:{color}});
+    s.addText(d, {x:x+0.2,y:y+0.1,w:5.8,h:0.45, fontSize:13,color,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText(body, {x:x+0.2,y:y+0.6,w:5.8,h:1.5, fontSize:12,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+  });
+
+  // Formula strip
+  s.addShape(pres.shapes.RECTANGLE, {x:0.3,y:7.05,w:12.7,h:0.42, fill:{color:C.navyMid}, line:{color:C.navyMid}});
+  s.addText("score = Σ(kaynak_ağırlığı × candidate_confidence)  +  min(0.15,  0.035 × (kaynak_sayısı − 1))     →     kabul: score ≥ 0.30  VEYA  güçlü SSM", {
+    x:0.5,y:7.05,w:12.3,h:0.42, fontSize:10.5,color:C.copperLt,bold:true,fontFace:"Calibri",align:"center",valign:"middle",
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 13 — NEDEN İKİNCİ FUSION SEVİYESİ?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Neden İki Seviye Fusion?", "Feature fusion yeterli değil — algorithm-level fusion neden gerekiyor?");
+  badge(s,13);
+
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+    x:0.3,y:1.42,w:12.7,h:0.72,
+    fill:{color:"F0FDF4"}, line:{color:C.green}, rounding:0.07,
+  });
+  s.addText("Feature-level fusion tek bir algoritmanın içindedir. Custom_librosa'nın verdiği sonuç zaten 6 sinyali birleştirdi. Ama custom_librosa'nın kendisi de bazen hata yapar. İkinci fusion seviyesi farklı algoritmaların hatalarını dengeler.", {
+    x:0.5,y:1.42,w:12.3,h:0.72, fontSize:12,color:C.green,fontFace:"Calibri",align:"left",valign:"middle",
+  });
+
+  // Two-level diagram
+  s.addText("Seviye 1 — Feature Fusion (custom_librosa içinde):", {
+    x:0.3,y:2.32,w:12.7,h:0.35, fontSize:13,color:C.navy,bold:true,fontFace:"Georgia",
+  });
+  flowRow(s, [
+    {label:"RMS\nsinyal",color:C.copper},
+    {label:"Chroma\nsinyal",color:C.teal},
+    {label:"Onset\nsinyal",color:C.green},
+    {label:"SSM\nsinyal",color:C.amber},
+    {label:"Beat\nsinyal",color:C.purple},
+  ], 0.5, 2.73, 1.8, 0.85);
+  s.addText("→", {x:10.2,y:2.88,w:0.3,h:0.5, fontSize:18,color:C.copper,bold:true,align:"center"});
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:10.55,y:2.73,w:2.5,h:0.85, fill:{color:C.copper},line:{color:C.copper},rounding:0.08});
+  s.addText("custom_librosa\nsonucu", {x:10.55,y:2.73,w:2.5,h:0.85, fontSize:11,color:C.white,bold:true,align:"center",valign:"middle"});
+
+  s.addShape(pres.shapes.RECTANGLE, {x:0.3,y:3.73,w:12.7,h:0.01, fill:{color:C.grayLt}, line:{color:C.grayLt}});
+
+  s.addText("Seviye 2 — Algorithm Fusion (ayrı worker):", {
+    x:0.3,y:3.82,w:12.7,h:0.35, fontSize:13,color:C.navy,bold:true,fontFace:"Georgia",
+  });
+  flowRow(s, [
+    {label:"custom_librosa\nsonucu",color:C.copper},
+    {label:"Foote\nsonucu",color:"5B21B6"},
+    {label:"CNMF\nsonucu",color:C.teal},
+    {label:"SCluster\nsonucu",color:C.green},
+  ], 0.5, 4.23, 2.3, 0.85);
+  s.addText("→", {x:10.2,y:4.38,w:0.3,h:0.5, fontSize:18,color:C.copper,bold:true,align:"center"});
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:10.55,y:4.23,w:2.5,h:0.85, fill:{color:C.navy},line:{color:C.navy},rounding:0.08});
+  s.addText("FUSION\nsonucu", {x:10.55,y:4.23,w:2.5,h:0.85, fontSize:11,color:C.white,bold:true,align:"center",valign:"middle"});
+
+  // Why two levels is the right choice
+  const table = [
+    ["","Feature-Level Fusion","Algorithm-Level Fusion"],
+    ["Oy verenler","Sinyal kaynakları (SSM, RMS, onset…)","Bağımsız segmentasyon algoritmaları"],
+    ["Girdi","Ham audio feature candidate'ları","Tamamlanmış AlgorithmResult nesneleri"],
+    ["Konum","custom_librosa pipeline içinde","Ayrı FusionWorker servisi"],
+    ["Amaç","Tek pipeline içinde sinyal çeşitliliği","Farklı hata profillerini dengeleme"],
+  ];
+  s.addTable(table.map((row,ri) => row.map((cell,ci) => ({
+    text: cell,
+    options: {
+      fontSize: ri===0||ci===0 ? 11 : 10.5,
+      bold: ri===0||ci===0,
+      color: ri===0 ? C.white : ci===0 ? C.navy : C.slate,
+      fill: ri===0 ? {color:C.navy} : ci===0 ? {color:"EEF2FF"} : {color:C.white},
+      align:"center",
+    },
+  }))), {x:0.3,y:5.28,w:12.7,h:2.05, colW:[2.5,5.1,5.1], border:{pt:1,color:C.grayLt}});
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 14 — SECTION DIVIDER
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  divider(s, "Algorithm-Level Fusion", "Neden ağırlıklı oy? Neden tüm sonuçları bekliyoruz?");
+  badge(s,14);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 15 — NEDEN AĞIRLIKLI OY?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Neden Ağırlıklı Oy? — Basit Çoğunluk Yetmez", "Algoritmalar eşit güvenilir değil; confidence bilgisi de önemli");
+  badge(s,15);
+
+  const alternatives = [
+    {
+      title:"❌ Simple Majority Vote",
+      problems:[
+        "Her algoritmayı eşit güvenilir sayar",
+        "Confidence değerini görmezden gelir",
+        "2/4 oyu olan boundary kabul edilir — zayıf kanıt",
+        "Over-segmenting bir algoritma fazla boundary üretip galip gelebilir",
+      ],
+      color:C.red,
+    },
+    {
+      title:"❌ Simple Average (zaman ortalaması)",
+      problems:[
+        "Aynı boundary'yi bulan algoritmaları gruplamaz",
+        "10 s arayla iki farklı boundary'nin ortası anlamsız",
+        "Confidence ve ağırlık bilgisini kullanmaz",
+      ],
+      color:C.amber,
+    },
+    {
+      title:"✓ Weighted Voting (seçtiğimiz)",
+      problems:[
+        "score = Σ(algoritmik_ağırlık × boundary_confidence)",
+        "custom_librosa (0.35) > scluster (0.30) > cnmf (0.20) > foote (0.15)",
+        "Grup içinde her algoritma en fazla 1 oy verir",
+        "Kabul: score ≥ threshold  VEYA  kaynak_sayısı ≥ gerekli_oy",
+      ],
+      color:C.green,
+    },
+  ];
+
+  alternatives.forEach(({title,problems,color},i) => {
+    const x=0.3+i*4.35;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x,y:1.42,w:4.05,h:4.5,
+      fill:{color:C.white}, line:{color:C.grayLt},
+      shadow:{type:"outer",color:"000000",blur:5,offset:1,angle:135,opacity:0.08}, rounding:0.08});
+    s.addShape(pres.shapes.RECTANGLE, {x,y:1.42,w:4.05,h:0.58, fill:{color}, line:{color}});
+    s.addText(title, {x:x+0.1,y:1.42,w:3.85,h:0.58, fontSize:12,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle"});
+    bullets(s, problems, x+0.1, 2.05, 3.85, 3.8, 11, C.slate);
+  });
+
+  // Why two acceptance conditions
+  s.addShape(pres.shapes.RECTANGLE, {x:0.3,y:6.1,w:12.7,h:0.42, fill:{color:C.navyMid}, line:{color:C.navyMid}});
+  s.addText("Neden iki kabul koşulu (score VEYA oy sayısı)?", {x:0.3,y:6.1,w:12.7,h:0.42, fontSize:13,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle"});
+  const condExplain = [
+    ["Tek threshold kullanırsak","Confidence calibration algoritmalar arasında tam değilse yüksek ağırlıklı algoritma sonucu körü körüne kabul edebilir"],
+    ["Oy sayısı fallback'i ile","İki bağımsız algoritma aynı bölgeyi gösterdiyse — confidence düşük bile olsa — consensus korunur"],
+  ];
+  condExplain.forEach(([t,d],i) => {
+    s.addText("▸ "+t+": "+d, {x:0.4,y:6.6+i*0.35,w:12.5,h:0.3, fontSize:10.5,color:C.grayLt,fontFace:"Calibri",align:"left",valign:"middle"});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 16 — NEDEN TÜM SONUÇLARI BEKLİYORUZ? (fusion orchestration)
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Fusion Neden Tüm Base Sonuçları Bekliyor?", "Yarım bilgiyle fusion yapmak sonucu kötüleştirir");
+  badge(s,16);
+
+  // Main reasoning
+  const reasons = [
+    {
+      title:"Erken fusion yanlı sonuç üretir",
+      body:"Foote hızlı bitip custom_librosa yavaş kalırsa: yalnızca Foote verisiyle fusion yapılır. Sonuç sanki 4 algoritma konuştu gibi görünür ama aslında 1 algoritmanın sesi vardır. Bu yanlış güven verir.",
+      color:C.red,
+    },
+    {
+      title:"Tüm perspektifler gelince consensus anlamlı olur",
+      body:"Custom_librosa yapısal SSM, SCluster global clustering, CNMF latent pattern, Foote local novelty — bunların dördü birden aynı boundary'yi gösterince güven gerçekten yükselir.",
+      color:C.green,
+    },
+    {
+      title:"En az 2 başarılı sonuç şartı",
+      body:"4 base'in tamamı resolved olduğunda başarılı sonuç 2'nin altındaysa fusion işe yaramaz. ResultListener doğrudan 'failed fusion' sonucu üretir — gereksiz hesaplama yapmaz.",
+      color:C.teal,
+    },
+    {
+      title:"Bilinen sınır: worker kaybolursa ne olur?",
+      body:"Worker exception fırlatırsa BaseWorker 'failed' sonuç yayınlar → resolved sayılır. Ama worker hiç yanıt vermeden çöküp giderse task processing'de kalır. Watchdog/timeout gelecek çalışma.",
+      color:C.amber,
+    },
+  ];
+
+  reasons.forEach(({title,body,color},i) => {
+    const col=i%2, row=Math.floor(i/2);
+    const x=0.3+col*6.55, y=1.42+row*2.88;
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:2.68, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:0.07,h:2.68, fill:{color}, line:{color}});
+    s.addText(title, {x:x+0.2,y:y+0.1,w:5.8,h:0.55, fontSize:13,color,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText(body, {x:x+0.2,y:y+0.72,w:5.8,h:1.9, fontSize:12,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+  });
+
+  quoteBar(s,"Güven için bütünlük şart: 4 farklı bakış açısının tamamından consensus alıyoruz, yoksa fusion yapmıyoruz",7.24);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 17 — NEDEN YAPISAL VE SEMANTİK LABEL AYRI?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Neden İki Katmanlı Etiketleme?", "Benzerlik iddiası ile müzikal rol iddiası farklı güç gerektirir");
+  badge(s,17);
+
+  // Core argument
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+    x:0.3,y:1.42,w:12.7,h:0.72,
+    fill:{color:"FFF8F0"}, line:{color:C.amber}, rounding:0.07,
+  });
+  s.addText("'Bu iki segment birbirine benziyor' demek ile 'bu segment Chorus' demek aynı iddianın gücünde değil. Birincisi audio descriptor ölçümüdür. İkincisi müzikal yorumdur.", {
+    x:0.5,y:1.42,w:12.3,h:0.72, fontSize:13,color:C.amber,fontFace:"Calibri",align:"left",valign:"middle",
+  });
+
+  // Visual: label example
+  const segs = [
+    {sl:"A",sem:"Intro",c:C.copper},{sl:"B",sem:"Verse",c:C.teal},{sl:"C",sem:"Chorus",c:C.green},
+    {sl:"B",sem:"Verse",c:C.teal},{sl:"C",sem:"Chorus",c:C.green},{sl:"D",sem:"Bridge",c:C.amber},{sl:"A",sem:"Outro",c:C.copper},
+  ];
+  const w = 13.3/segs.length;
+  segs.forEach(({sl,sem,c},i) => {
+    s.addShape(pres.shapes.RECTANGLE, {x:i*w,y:2.32,w:w-0.03,h:0.6, fill:{color:c}, line:{color:c}});
+    s.addText(`Struct: ${sl}`, {x:i*w,y:2.32,w:w-0.03,h:0.32, fontSize:10,color:C.white,bold:true,align:"center",valign:"middle"});
+    s.addText(sem, {x:i*w,y:2.64,w:w-0.03,h:0.28, fontSize:9,color:C.white,align:"center",valign:"middle"});
+  });
+
+  const layers = [
+    {
+      title:"Structural Label (A/B/C)",
+      subtitle:"'Bu segment o segmente benziyor' — ölçülebilir, güvenilir",
+      points:[
+        "Chroma, MFCC, RMS, onset density descriptor'larından cluster edilir",
+        "Agglomerative clustering; silhouette score ile en iyi k seçilir",
+        "A = en sık küme, B = ikinci, sırayla — Verse anlamına gelmez",
+        "Dürüst iddia: audio descriptor benzerliği ölçüldü",
+      ],
+      color:C.copper,
+    },
+    {
+      title:"Semantic Label (Intro/Verse/Chorus…)",
+      subtitle:"'Bu section müzikal olarak X rolünü oynuyor' — heuristic, daha zayıf",
+      points:[
+        "Heuristic kurallar: ilk %20'deki unique segment → Intro tahmini",
+        "Tekrar eden, daha yüksek enerjili cluster → Chorus tahmini",
+        "Structural label'ı overwrite etmez — ayrı alan",
+        "Her label için semantic_confidence ve semantic_reason yazılır",
+        "Kanıt yetersizse 'Unknown' veya 'Early/Middle/Late' verilir",
+      ],
+      color:C.teal,
+    },
+  ];
+
+  layers.forEach(({title,subtitle,points,color},i) => {
+    const x=0.3+i*6.55;
+    s.addShape(pres.shapes.RECTANGLE, {x,y:3.12,w:6.1,h:4.28, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y:3.12,w:6.1,h:0.55, fill:{color}, line:{color}});
+    s.addText(title, {x:x+0.1,y:3.12,w:5.9,h:0.55, fontSize:14,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle"});
+    s.addText(subtitle, {x:x+0.1,y:3.72,w:5.9,h:0.45, fontSize:11,color,bold:true,fontFace:"Calibri",italic:true,align:"left",valign:"middle"});
+    bullets(s, points, x+0.1, 4.22, 5.9, 3.1, 11, C.slate);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 18 — NEDEN İKİ FARKLI TOLERANS?
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Evaluation — Neden İki Farklı Tolerans?", "Bir ölçüm sistemin hangi sorununu saklıyor?");
+  badge(s,18);
+
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+    x:0.3,y:1.42,w:12.7,h:0.72,
+    fill:{color:"EFF6FF"}, line:{color:C.teal}, rounding:0.07,
+  });
+  s.addText("Tek toleransla ölçüm yapmak bir sistemin gerçek performansını gizleyebilir. Doğru bölgeyi bulan ama tam saniyeyi kaçıran sistemle hem bölgeyi hem saniyeyi kaçıran sistemi ayırt edemezsiniz.", {
+    x:0.5,y:1.42,w:12.3,h:0.72, fontSize:12,color:C.navy,fontFace:"Calibri",align:"left",valign:"middle",
+  });
+
+  // Two tolerance explanations
+  const tols = [
+    {
+      tol:"±0.5 saniye — Strict",
+      question:"Tam zamanı bulduk mu?",
+      measures:"Boundary timestamp hassasiyetini ölçer. F1@0.5 düşükse algoritma yapısal geçişin bölgesini buluyor ama exact millisecond'u kaçırıyor olabilir.",
+      lowMeans:"Snapping, frame çözünürlüğü veya SSM smoothing timestamp'i kaydırıyor",
+      color:C.copper,
+    },
+    {
+      tol:"±3.0 saniye — Lenient",
+      question:"Doğru bölgeyi fark ettik mi?",
+      measures:"Yapısal region detection'ı ölçer. Bir section'ın var olduğunu fark ettik mi? F1@3.0 yüksekse sistem müzikal yapıyı anlıyor demektir.",
+      lowMeans:"Temel boundary detection veya boundary sayısı problemi var",
+      color:C.teal,
+    },
+  ];
+
+  tols.forEach(({tol,question,measures,lowMeans,color},i) => {
+    const x=0.3+i*6.55;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x,y:2.32,w:6.1,h:3.65,
+      fill:{color:C.white}, line:{color:C.grayLt},
+      shadow:{type:"outer",color:"000000",blur:5,offset:1,angle:135,opacity:0.07}, rounding:0.08});
+    s.addShape(pres.shapes.RECTANGLE, {x,y:2.32,w:6.1,h:0.65, fill:{color}, line:{color}});
+    s.addText(tol, {x:x+0.1,y:2.32,w:5.9,h:0.65, fontSize:16,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle"});
+    s.addText("Soru: "+question, {x:x+0.1,y:3.03,w:5.9,h:0.38, fontSize:13,color,bold:true,fontFace:"Georgia",align:"left",valign:"middle"});
+    s.addText(measures, {x:x+0.1,y:3.47,w:5.9,h:1.05, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:x+0.1,y:4.6,w:5.9,h:1.22, fill:{color:"FFF7ED"}, line:{color:C.amber}, rounding:0.05});
+    s.addText("Düşükse: "+lowMeans, {x:x+0.2,y:4.65,w:5.7,h:1.12, fontSize:11,color:C.amber,fontFace:"Calibri",align:"left",valign:"middle"});
+  });
+
+  // Interpretation table
+  s.addShape(pres.shapes.RECTANGLE, {x:0.3,y:6.1,w:12.7,h:0.42, fill:{color:C.navyMid}, line:{color:C.navyMid}});
+  s.addText("Sonuç yorumlama kılavuzu", {x:0.3,y:6.1,w:12.7,h:0.42, fontSize:12,color:C.white,bold:true,fontFace:"Georgia",align:"center",valign:"middle"});
+
+  const interp = [
+    ["F1@3 yüksek,  F1@0.5 düşük","Doğru bölgeyi buluyor ama timestamp hassasiyeti zayıf → snapping geliştirilebilir"],
+    ["Her ikisi de yüksek","Hem bölge hem timing doğru → iyi çalışan sistem"],
+    ["Her ikisi de düşük","Temel boundary detection problemi var → boundary sayısı veya konumu hatalı"],
+  ];
+  interp.forEach(([scenario,meaning],i) => {
+    const y=6.6+i*0.38;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:0.3,y,w:4.5,h:0.32, fill:{color:C.copper},line:{color:C.copper},rounding:0.05});
+    s.addText(scenario, {x:0.3,y,w:4.5,h:0.32, fontSize:9.5,color:C.white,bold:true,align:"center",valign:"middle",margin:0});
+    s.addText("→  "+meaning, {x:4.9,y,w:8.2,h:0.32, fontSize:10.5,color:C.grayLt,fontFace:"Calibri",align:"left",valign:"middle"});
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 19 — DEMO
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Canlı Demo", "Sistemin kendi diagnostics'iyle kararlarını açıklaması");
+  badge(s,19);
+
+  const steps = [
+    {n:"1",title:"Track seç, 4 base + fusion başlat",
+     why:"Request gönderildiğinde fusion worker hemen başlamaz — önce 4 bağımsız worker paralel dispatch edilir. RabbitMQ ayrı routing key'lere mesaj iletir.",color:C.copper},
+    {n:"2",title:"Partial sonuçlar gelirken status izle",
+     why:"Task hâlâ 'processing'. Custom ve Foote geldi ama CNMF ve SCluster bekleniyor. Frontend SSE stream'i ile anlık güncelleniyor.",color:C.teal},
+    {n:"3",title:"Her algoritmanın farklı boundary'lerini karşılaştır",
+     why:"İşte neden fusion gerekti bunun göstergesi: 4 algoritmanın boundary timeline'larının birbirinden farklı olduğunu canlı görebilirsiniz.",color:C.green},
+    {n:"4",title:"Fusion diagnostics'i aç",
+     why:"Her fused boundary hangi algoritmalar oy verdi, ham timestamp neydi, weighted score neydi, kabul mi reddedildi mi — hepsi açıklanmış durumda.",color:C.amber},
+    {n:"5",title:"Evaluation sonuçlarını göster",
+     why:"F1@0.5 ve F1@3.0 değerleri. Strict ve lenient toleransı beraber yorumla: bölge mi doğru, timing mi doğru, ikisi birden mi?",color:C.purple},
+  ];
+
+  steps.forEach(({n,title,why,color},i) => {
+    const y=1.42+i*1.12;
+    s.addShape(pres.shapes.RECTANGLE, {x:0.3,y,w:12.7,h:1.0, fill:{color:C.white}, line:{color:C.grayLt}});
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {x:0.35,y:y+0.1,w:0.55,h:0.55, fill:{color}, line:{color}, rounding:0.08});
+    s.addText(n, {x:0.35,y:y+0.1,w:0.55,h:0.55, fontSize:15,color:C.white,bold:true,align:"center",valign:"middle",margin:0});
+    s.addText(title, {x:1.05,y:y+0.08,w:5.5,h:0.4, fontSize:13,color:C.navy,bold:true,fontFace:"Georgia",align:"left",valign:"middle",margin:0});
+    s.addText("Anlatılacak: "+why, {x:1.05,y:y+0.52,w:11.8,h:0.42, fontSize:11,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+  });
+
+  s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+    x:0.3,y:7.05,w:12.7,h:0.4,
+    fill:{color:"FFF7ED"}, line:{color:C.amber}, rounding:0.05,
+  });
+  s.addText("Risk planı: Önceden tamamlanmış bir task ID ve fusion diagnostics JSON'unun screenshot'ı hazır tutun. Worker gecikirerse bunu asenkron mimarinin avantajını göstermek için kullanın.", {
+    x:0.5,y:7.05,w:12.3,h:0.4, fontSize:10,color:C.amber,bold:true,fontFace:"Calibri",align:"center",valign:"middle",
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SLIDE 20 — SONUÇ
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const s = pres.addSlide();
+  header(s, "Sonuç — Ne Yaptık ve Neden?", "Her kararın arkasında bir problem bağlamı var");
+  badge(s,20);
+
+  const decisions = [
+    {d:"Dağıtık mimari",why:"DSP işlemi API'yi bloke etmesin, her algoritma bağımsız scale edilsin",color:C.teal},
+    {d:"Ortak result şeması",why:"Fusion hiçbir algoritmayı özel olarak tanımasın; yeni worker eklemek sadece şemaya uymak olsun",color:C.copper},
+    {d:"Feature-level fusion",why:"Tek sinyal her genre'da güvenilir değil; 6 bağımsız kanıtın consensus'u daha sağlam",color:C.green},
+    {d:"Algorithm-level fusion",why:"Tek pipeline da hata yapabilir; farklı matematiksel perspektiflerden gelen oylar hata profillerini dengeler",color:C.amber},
+    {d:"Yapısal/semantik ayrımı",why:"Benzerlik iddiası ölçülebilir; müzikal rol iddiası heuristic — ikisini karıştırmak bilimsel dürüstlüğü bozar",color:C.purple},
+    {d:"İki tolerans (0.5s / 3.0s)",why:"Bölgeyi bulmak ile tam saniyeyi bulmak farklı beceriler — tek metrik hangisinde kötü olduğumuzu gizler",color:C.navy},
+  ];
+
+  decisions.forEach(({d,why,color},i) => {
+    const col=i%2, row=Math.floor(i/2);
+    const x=0.3+col*6.55, y=1.42+row*1.82;
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:1.65, fill:{color:C.white}, line:{color:C.grayLt},
+      shadow:{type:"outer",color:"000000",blur:4,offset:1,angle:135,opacity:0.07}});
+    s.addShape(pres.shapes.RECTANGLE, {x,y,w:6.1,h:0.5, fill:{color}, line:{color}});
+    s.addText("✓ "+d, {x:x+0.1,y,w:5.9,h:0.5, fontSize:13,color:C.white,bold:true,fontFace:"Georgia",align:"left",valign:"middle"});
+    s.addText("Neden: "+why, {x:x+0.1,y:y+0.56,w:5.9,h:1.05, fontSize:12,color:C.slate,fontFace:"Calibri",align:"left",valign:"top"});
+  });
+
+  // Closing
+  s.addShape(pres.shapes.RECTANGLE, {x:0,y:7.38,w:13.3,h:0.42, fill:{color:C.navy}, line:{color:C.navy}});
+  s.addText("Katkımız yeni bir algoritma değil — çoklu sinyal, çoklu algoritma ve iki seviye fusion kararlarının dağıtık, açıklanabilir ve ölçülebilir bir sistemde birleştirilmesidir.", {
+    x:0.3,y:7.38,w:12.7,h:0.42, fontSize:10.5,color:C.copperLt,fontFace:"Calibri",align:"center",valign:"middle",
+  });
+}
+
+// ─── GENERATE ────────────────────────────────────────────────────────────────
+pres.writeFile({fileName:"docs/MusicSegmentation_FinalPresentation.pptx"})
+  .then(()=>console.log("✅  docs/MusicSegmentation_FinalPresentation.pptx oluşturuldu"))
+  .catch(e=>{console.error("❌ Hata:",e);process.exit(1);});

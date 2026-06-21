@@ -155,14 +155,17 @@ def assign_structural_labels(
         existing = [str(s.get("structural_label") or s.get("label") or "").strip() for s in out]
         if all(label and label.lower() not in {"unknown", "none"} for label in existing):
             counts = Counter(existing)
-            order = {label: chr(65 + idx) for idx, (label, _) in enumerate(counts.most_common())}
-            for seg, label in zip(out, existing):
-                structural = order.get(label, "A")
-                seg["structural_label"] = structural
-                seg["label"] = structural
-                seg.setdefault("label_confidence", 0.5)
-                seg.setdefault("label_method", method_hint or "existing_structural")
-            return out
+            # Only remap when labels are actually varied; uniform labels (e.g. all '0'
+            # from boundary-only MSAF algorithms) would otherwise all collapse to 'A'.
+            if len(counts) > 1:
+                order = {label: chr(65 + idx) for idx, (label, _) in enumerate(counts.most_common())}
+                for seg, label in zip(out, existing):
+                    structural = order.get(label, "A")
+                    seg["structural_label"] = structural
+                    seg["label"] = structural
+                    seg.setdefault("label_confidence", 0.5)
+                    seg.setdefault("label_method", method_hint or "existing_structural")
+                return out
 
         for idx, seg in enumerate(out):
             structural = chr(65 + min(idx, 25))
@@ -224,20 +227,6 @@ def assign_semantic_labels(
     repeated = {label for label, count in counts.items() if count >= 2}
     total_duration = float(duration_seconds or (max(float(s.get("end", 0.0) or 0.0) for s in out) if out else 0.0))
 
-    chorus_label: str | None = None
-    if repeated:
-        candidates = []
-        for label in repeated:
-            idxs = [i for i, value in enumerate(labels) if value == label]
-            candidates.append((float(np.mean(energy[idxs])), len(idxs), label))
-        best_energy, best_count, best_label = max(candidates)
-        # Lower threshold so uniform-energy tracks (e.g. classical) still get a chorus label.
-        if best_energy >= 0.40:
-            chorus_label = best_label
-        else:
-            # Fall back to most-frequent repeated label when energy is too flat to discriminate.
-            _, _, chorus_label = max(candidates, key=lambda c: (c[1], c[0]))
-
     # Descriptor index layout: chroma_mean(12)+chroma_std(12)+mfcc_mean(13)+mfcc_std(13)+rms_mean(1)+...
     _RMS_IDX = 50
 
@@ -254,6 +243,31 @@ def assign_semantic_labels(
     _content_indices = [i for i, s in enumerate(_silence_flags) if not s]
     _first_content = _content_indices[0] if _content_indices else 0
     _last_content = _content_indices[-1] if _content_indices else len(out) - 1
+
+    chorus_label: str | None = None
+    if repeated:
+        candidates = []
+        for label in repeated:
+            idxs = [i for i, value in enumerate(labels) if value == label]
+            candidates.append((float(np.mean(energy[idxs])), len(idxs), label))
+
+        # Exclude labels whose every occurrence falls on the intro or outro position —
+        # those segments will be claimed by Intro/Outro rules and can never be Chorus.
+        body_candidates = [
+            (e, c, lbl) for e, c, lbl in candidates
+            if any(i != _first_content and i != _last_content
+                   for i, v in enumerate(labels) if v == lbl)
+        ]
+        if not body_candidates:
+            body_candidates = candidates
+
+        best_energy, best_count, best_label = max(body_candidates)
+        # Lower threshold so uniform-energy tracks (e.g. classical) still get a chorus label.
+        if best_energy >= 0.40:
+            chorus_label = best_label
+        else:
+            # Fall back to most-frequent repeated label when energy is too flat to discriminate.
+            _, _, chorus_label = max(body_candidates, key=lambda c: (c[1], c[0]))
 
     for idx, seg in enumerate(out):
         structural = labels[idx]
