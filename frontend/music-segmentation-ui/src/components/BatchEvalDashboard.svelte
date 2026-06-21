@@ -44,7 +44,7 @@
   let viewingHistoryId = null;   // job_id of the history run currently displayed
 
   // ── Regex for parsing SSE log lines ──────────────────────────────────────
-  const RE_F1       = /\[\s*(\d+)\/\s*(\d+)\]\s+(\d+).*?F1=([\d.]+)/;
+  const RE_F1       = /\[\s*(\d+)\/\s*(\d+)\]\s+(\d+).*?([a-zA-Z0-9_-]+)\s+F1=([\d.]+)/;
   const RE_PROGRESS = /\[\s*(\d+)\/\s*(\d+)\]/;
 
   // ── Derived state ─────────────────────────────────────────────────────────
@@ -136,15 +136,20 @@
       const completed = parseInt(mF1[1], 10);
       const total     = parseInt(mF1[2], 10);
       const songId    = mF1[3];
-      const f1        = parseFloat(mF1[4]);
+      const algorithm = mF1[4];
+      const f1        = parseFloat(mF1[5]);
       progressCompleted = completed;
       progressTotal     = total;
       // Upsert live row
-      const idx = liveRows.findIndex((r) => String(r.song_id) === String(songId));
+      const idx = liveRows.findIndex(
+        (r) => String(r.song_id) === String(songId) && r.algorithm === algorithm,
+      );
+      const liveRow = { song_id: songId, algorithm, f_measure: f1 };
       if (idx >= 0) {
-        liveRows[idx] = { song_id: songId, f_measure: f1 };
+        liveRows[idx] = liveRow;
+        liveRows = [...liveRows];
       } else {
-        liveRows = [...liveRows, { song_id: songId, f_measure: f1 }];
+        liveRows = [...liveRows, liveRow];
       }
       return;
     }
@@ -844,7 +849,7 @@
                 {#each sortedRows as row (`${row.song_id}-${row.algorithm ?? "default"}`)}
                   <tr class={"border-b border-zinc-800/40 transition-colors " + (row.is_outlier ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-zinc-800/20")}>
                     <td class="px-4 py-2 text-xs text-zinc-500 font-mono whitespace-nowrap">{row.song_id}</td>
-                    <td class="px-4 py-2 text-xs text-zinc-300 font-mono whitespace-nowrap">{row.algorithm ?? "custom_librosa"}</td>
+                    <td class="px-4 py-2 text-xs text-zinc-300 font-mono whitespace-nowrap">{row.algorithm ?? "—"}</td>
                     <td class="px-4 py-2 text-zinc-300 max-w-[180px]">
                       <span class="block truncate" title={row.title ?? "—"}>{row.title ?? "—"}</span>
                     </td>

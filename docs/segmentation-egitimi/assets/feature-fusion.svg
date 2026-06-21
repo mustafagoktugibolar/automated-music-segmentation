@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520" role="img" aria-labelledby="title desc">
+  <title id="title">Feature-level fusion</title><desc id="desc">Altı feature kaynağı ortak candidate şemasına dönüşür, zamana göre gruplanır, ağırlıklı skorlanır, anchor seçilir ve beat veya onset'e hizalanır.</desc>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0 0L9 3L0 6Z" fill="#475569"/></marker>
+  <style>.t{font:700 21px system-ui;fill:#0f172a}.h{font:600 14px system-ui;fill:#0f172a}.s{font:12px system-ui;fill:#334155}.box{fill:#f8fafc;stroke:#94a3b8;stroke-width:2}.src{fill:#eff6ff;stroke:#3b82f6;stroke-width:1.5}</style></defs>
+  <rect width="1100" height="520" rx="20" fill="#fff"/><text x="35" y="38" class="t">Feature-level fusion: altı farklı gözlem tek boundary kararına nasıl dönüşür?</text>
+  <text x="35" y="72" class="h">INPUT: aynı audio'dan bağımsız kanıtlar</text>
+  <g transform="translate(35 90)">
+    <rect width="150" height="48" rx="10" class="src"/><text x="20" y="29" class="h">SSM 42.0 s</text>
+    <rect y="58" width="150" height="48" rx="10" class="src"/><text x="20" y="87" class="h">Chord 42.5 s</text>
+    <rect y="116" width="150" height="48" rx="10" class="src"/><text x="20" y="145" class="h">RMS 41.7 s</text>
+    <rect y="174" width="150" height="48" rx="10" class="src"/><text x="20" y="203" class="h">Onset 42.2 s</text>
+    <rect y="232" width="150" height="48" rx="10" class="src"/><text x="20" y="261" class="h">Beat 42.1 s</text>
+    <rect y="290" width="150" height="48" rx="10" class="src"/><text x="20" y="319" class="h">Lyrics 43.0 s</text>
+  </g>
+  <line x1="190" y1="260" x2="275" y2="260" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="275" y="105" width="220" height="310" rx="14" class="box"/><text x="295" y="138" class="h">1. Candidate normalization</text><text x="295" y="165" class="s">{time, source, confidence}</text>
+  <text x="295" y="215" class="h">2. Zaman gruplama</text><text x="295" y="242" class="s">merge window içindeki oylar</text>
+  <text x="295" y="292" class="h">3. Source tekilleştirme</text><text x="295" y="319" class="s">aynı source yalnız bir oy</text>
+  <text x="295" y="369" class="h">4. Weighted score</text><text x="295" y="396" class="s">Σ weight × confidence + bonus</text>
+  <line x1="495" y1="260" x2="565" y2="260" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="565" y="105" width="220" height="310" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/><text x="585" y="138" class="h">5. Kabul kararı</text><text x="585" y="168" class="s">score ≥ threshold</text><text x="585" y="190" class="s">veya güçlü SSM</text>
+  <text x="585" y="240" class="h">6. Anchor seçimi</text><text x="585" y="270" class="s">SSM → chord → lyrics</text>
+  <text x="585" y="320" class="h">7. Snap</text><text x="585" y="350" class="s">yakın beat, sonra güçlü onset</text>
+  <text x="585" y="395" class="s">Örnek anchor: 42.0 s</text>
+  <line x1="785" y1="260" x2="855" y2="260" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="855" y="160" width="210" height="200" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="2"/><text x="875" y="195" class="h">OUTPUT</text><text x="875" y="230" class="h">Boundary: 42.1 s</text><text x="875" y="260" class="s">sources: SSM, chord, RMS,</text><text x="875" y="282" class="s">onset, beat, lyrics</text><text x="875" y="320" class="s">confidence: fused score</text>
+  <text x="35" y="480" class="s">Önemli: feature fusion, tek custom_librosa çalışmasının içindedir; algoritma sonuçlarını birleştiren fusion değildir.</text>
+</svg>

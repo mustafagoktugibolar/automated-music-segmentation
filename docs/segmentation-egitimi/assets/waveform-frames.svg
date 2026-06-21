@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="430" viewBox="0 0 1100 430" role="img" aria-labelledby="title desc">
+  <title id="title">Ses dalgasından frame ve RMS üretimi</title>
+  <desc id="desc">Ham ses sampleları frame pencerelerine ayrılır, her frame için RMS hesaplanır ve zaman boyunca RMS eğrisi oluşur.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L9,3 L0,6 Z" fill="#475569"/></marker>
+    <style>
+      .title{font:700 22px system-ui;fill:#0f172a}.label{font:600 15px system-ui;fill:#0f172a}.small{font:13px system-ui;fill:#334155}
+      .box{fill:#f8fafc;stroke:#94a3b8;stroke-width:2}.frame{fill:#dbeafe;stroke:#2563eb;stroke-width:2}.axis{stroke:#64748b;stroke-width:1.5}
+    </style>
+  </defs>
+  <rect width="1100" height="430" rx="20" fill="#ffffff"/>
+  <text x="40" y="38" class="title">Ham ses → frame’ler → tek RMS değeri → RMS eğrisi</text>
+  <rect x="35" y="65" width="1030" height="150" rx="14" class="box"/>
+  <text x="55" y="92" class="label">INPUT: waveform y — her nokta bir sample amplitude değeridir</text>
+  <line x1="60" y1="145" x2="1040" y2="145" class="axis"/>
+  <path d="M60 145 L75 118 L90 170 L105 98 L120 184 L135 125 L150 153 L165 136 L180 145 L195 143 L210 147 L225 140 L240 151 L255 135 L270 158 L285 108 L300 180 L315 93 L330 191 L345 112 L360 160 L375 128 L390 148 L405 142 L420 149 L435 139 L450 155 L465 120 L480 175 L495 104 L510 185 L525 119 L540 160 L555 130 L570 145 L585 144 L600 148 L615 137 L630 154 L645 115 L660 177 L675 100 L690 190 L705 110 L720 165 L735 126 L750 151 L765 140 L780 149 L795 135 L810 158 L825 109 L840 181 L855 95 L870 188 L885 116 L900 160 L915 130 L930 150 L945 139 L960 151 L975 134 L990 158 L1005 122 L1020 168 L1040 145" fill="none" stroke="#7c3aed" stroke-width="3"/>
+  <rect x="270" y="102" width="240" height="88" rx="8" class="frame" opacity=".45"/>
+  <rect x="390" y="102" width="240" height="88" rx="8" class="frame" opacity=".45"/>
+  <text x="290" y="207" class="small">Frame 1</text><text x="520" y="207" class="small">Frame 2</text>
+  <line x1="390" y1="225" x2="390" y2="270" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="420" y="250" class="small">hop_length = iki frame başlangıcı arasındaki sample adımı</text>
+  <rect x="35" y="280" width="315" height="105" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="55" y="310" class="label">İŞLEM: her frame için RMS</text>
+  <text x="55" y="340" class="small">kare al → ortala → karekök al</text>
+  <text x="55" y="366" class="small">Bir frame, tek pozitif büyüklüğe iner.</text>
+  <line x1="350" y1="333" x2="420" y2="333" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="420" y="280" width="645" height="105" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <text x="440" y="310" class="label">OUTPUT: zaman boyunca RMS değerleri</text>
+  <line x1="450" y1="362" x2="1035" y2="362" class="axis"/>
+  <polyline points="450,350 510,348 570,344 630,330 690,305 750,315 810,342 870,350 930,326 990,300 1035,318" fill="none" stroke="#059669" stroke-width="4"/>
+  <text x="820" y="380" class="small">Büyük değişimler boundary kanıtı olabilir.</text>
+</svg>

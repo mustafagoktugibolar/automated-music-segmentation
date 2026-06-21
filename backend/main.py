@@ -24,6 +24,28 @@ result_listener = ResultListener()
 from contextlib import asynccontextmanager
 
 
+def _mark_stale_jobs_failed():
+    """Mark any BatchEvalJob still 'running' at startup as failed (server was restarted mid-run)."""
+    from backend.db.models import BatchEvalJob
+    from backend.db.postgreSQL import SessionLocal
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    try:
+        stale = db.query(BatchEvalJob).filter(BatchEvalJob.status == "running").all()
+        for job in stale:
+            job.status = "failed"
+            job.error = "server_restart"
+            job.completed_at = datetime.now(timezone.utc)
+        if stale:
+            db.commit()
+            logger.info("Marked %d stale batch job(s) as failed (server restart).", len(stale))
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Could not mark stale jobs: %s", exc)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up application...")
@@ -34,6 +56,8 @@ async def lifespan(app: FastAPI):
 
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created.")
+
+    _mark_stale_jobs_failed()
 
     result_listener.start()
     yield

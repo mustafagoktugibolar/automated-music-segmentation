@@ -289,9 +289,10 @@ def _batch_summary(rows: list[dict], tolerance: float) -> str:
 
 
 def _save_batch_job_result(job_id: str, rows: list[dict], summary: str | None, error: str | None) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
     ok_rows      = [r for r in rows if not r.get("error")]
     included     = [r for r in ok_rows if not r.get("is_outlier", False)]
-    use_rows     = included if included else ok_rows   # fall back to all if every row is an outlier
+    use_rows     = included if included else ok_rows
     avg_p = sum(r["precision"]  for r in use_rows) / len(use_rows) if use_rows else None
     avg_r = sum(r["recall"]     for r in use_rows) / len(use_rows) if use_rows else None
     avg_f = sum(r["f_measure"]  for r in use_rows) / len(use_rows) if use_rows else None
@@ -299,21 +300,25 @@ def _save_batch_job_result(job_id: str, rows: list[dict], summary: str | None, e
     db = SessionLocal()
     try:
         record = db.query(BatchEvalJob).filter(BatchEvalJob.job_id == job_id).first()
-        if record:
-            record.status       = "failed" if error else "completed"
-            record.completed_at = datetime.now(timezone.utc)
-            record.summary      = summary
-            record.rows         = rows
-            record.error        = error
-            record.tracks_ok    = len(ok_rows)
-            record.tracks_total = len(rows)
-            record.avg_precision = avg_p
-            record.avg_recall    = avg_r
-            record.avg_f1        = avg_f
-            db.commit()
+        if not record:
+            logger.error("BatchEvalJob %s not found in DB — cannot save result.", job_id)
+            return
+        record.status        = "failed" if error else "completed"
+        record.completed_at  = datetime.now(timezone.utc)
+        record.summary       = summary
+        record.rows          = list(rows)
+        flag_modified(record, "rows")
+        record.error         = error
+        record.tracks_ok     = len(ok_rows)
+        record.tracks_total  = len(rows)
+        record.avg_precision = avg_p
+        record.avg_recall    = avg_r
+        record.avg_f1        = avg_f
+        db.commit()
+        logger.info("BatchEvalJob %s saved: status=%s tracks=%d/%d", job_id, record.status, len(ok_rows), len(rows))
     except Exception as exc:
         db.rollback()
-        logger.error("Failed to persist BatchEvalJob %s: %s", job_id, exc)
+        logger.error("Failed to persist BatchEvalJob %s: %s", job_id, exc, exc_info=True)
     finally:
         db.close()
 
@@ -333,32 +338,37 @@ async def _run_batch_eval_async(
     requested_algorithms = [canonical_algorithm_name(a) for a in (algorithms or ["custom_librosa"])]
     if "fusion" in requested_algorithms:
         algorithms_to_evaluate = list(dict.fromkeys([*BASELINE_ALGORITHMS, "fusion"]))
+        algorithms_to_report = {"fusion"}
     else:
         algorithms_to_evaluate = requested_algorithms
+        algorithms_to_report = set(requested_algorithms)
     tolerances = tolerances or [tolerance, 3.0]
 
     def log(line: str) -> None:
         job["lines"].append(line)
 
     async def dispatch_one(sid: str, title: str) -> dict:
-        """Download audio + push to queue. Semaphore limits concurrent downloads."""
-        async with sem:
-            ref = await asyncio.to_thread(
-                lambda: parse_salami_annotation(sid, annotator=1)
-                        or parse_salami_annotation(sid, annotator=2)
-            )
-            if not ref:
-                return {"sid": sid, "title": title, "skip": "no_annotation", "ref": None}
+        """Download audio and push one track to the worker queues."""
+        ref = await asyncio.to_thread(
+            lambda: parse_salami_annotation(sid, annotator=1)
+                    or parse_salami_annotation(sid, annotator=2)
+        )
+        if not ref:
+            return {"sid": sid, "title": title, "skip": "no_annotation", "ref": None}
 
-            audio = await asyncio.to_thread(_download_from_minio, sid)
-            if audio is None:
-                return {"sid": sid, "title": title, "skip": "minio_not_found", "ref": None}
+        audio = await asyncio.to_thread(_download_from_minio, sid)
+        if audio is None:
+            return {"sid": sid, "title": title, "skip": "minio_not_found", "ref": None}
 
+        try:
             task_id = await asyncio.to_thread(_dispatch_to_worker, audio, f"{sid}.mp3", requested_algorithms, llm_mode)
-            return {"sid": sid, "title": title, "task_id": task_id, "ref": ref}
+        except Exception as exc:
+            logger.error("dispatch_one %s failed: %s", sid, exc)
+            return {"sid": sid, "title": title, "skip": f"dispatch_failed: {exc}", "ref": None}
+        return {"sid": sid, "title": title, "task_id": task_id, "ref": ref}
 
     async def collect_one(dispatch: dict, idx: int, total: int) -> list[dict] | dict:
-        """Poll for task result and compute metrics. No semaphore — all run concurrently."""
+        """Poll for one task result and compute its metrics."""
         sid, title = dispatch["sid"], dispatch["title"]
         if "skip" in dispatch:
             reason = dispatch["skip"]
@@ -375,7 +385,8 @@ async def _run_batch_eval_async(
             for algo in algorithms_to_evaluate:
                 est = extract_segments(results.get(algo))
                 if not est:
-                    rows.append({"song_id": sid, "title": title, "algorithm": algo, "error": "missing_result"})
+                    if algo in algorithms_to_report:
+                        rows.append({"song_id": sid, "title": title, "algorithm": algo, "error": "missing_result"})
                     continue
                 m2 = compute_boundary_metrics(ref, est, tolerance=tolerance)
                 m_multi = compute_boundary_metrics_multi(ref, est, tolerances=tolerances)
@@ -392,7 +403,8 @@ async def _run_batch_eval_async(
                 }
                 row.update({k: v for k, v in m_multi.items() if k != "by_tolerance"})
                 row["is_outlier"] = row.get("f1_3_0", 0.0) < coverage_outlier_threshold
-                rows.append(row)
+                if algo in algorithms_to_report:
+                    rows.append(row)
 
             ok_parts = [
                 f"{r['algorithm']} F1={r.get('f_measure', 0):.3f}"
@@ -404,6 +416,12 @@ async def _run_batch_eval_async(
             log(f"[{idx:>3}/{total}] {sid}  EXCEPTION: {exc}")
             logger.error("collect_one %s failed", sid, exc_info=True)
             return {"song_id": sid, "title": title, "error": str(exc)}
+
+    async def process_one(sid: str, title: str, idx: int, total: int) -> list[dict] | dict:
+        """Keep one concurrency slot until the track is fully evaluated."""
+        async with sem:
+            dispatch = await dispatch_one(sid, title)
+            return await collect_one(dispatch, idx, total)
 
     try:
         meta          = await asyncio.to_thread(_load_salami_metadata)
@@ -422,17 +440,18 @@ async def _run_batch_eval_async(
             candidates = candidates[:max_tracks]
         log(f"Evaluating  : {len(candidates)} tracks  (concurrency={concurrency})\n")
 
-        # Phase 1: dispatch all tasks to the queue concurrently (semaphore limits downloads)
-        dispatches = list(await asyncio.gather(*[
-            dispatch_one(sid, meta.get(sid, {}).get("title", sid))
-            for sid in candidates
-        ]))
-        log(f"All {len(candidates)} tasks dispatched — waiting for results...\n")
-
-        # Phase 2: poll all tasks concurrently (no semaphore — just async waits)
+        # Keep at most `concurrency` tracks in flight. A slot is released only
+        # after the worker result is collected, so queue wait time cannot consume
+        # the per-task result timeout for hundreds of undispatched tracks.
+        log(f"Processing in a bounded window of {concurrency} tracks...\n")
         gathered = list(await asyncio.gather(*[
-            collect_one(d, i, len(candidates))
-            for i, d in enumerate(dispatches, 1)
+            process_one(
+                sid,
+                meta.get(sid, {}).get("title", sid),
+                i,
+                len(candidates),
+            )
+            for i, sid in enumerate(candidates, 1)
         ]))
         rows: list[dict] = []
         for item in gathered:
@@ -452,13 +471,22 @@ async def _run_batch_eval_async(
         log(f"FATAL: {exc}\n{traceback.format_exc()}")
     finally:
         job["done"] = True
-        await asyncio.to_thread(
-            _save_batch_job_result,
-            job_id,
-            job.get("rows", []),
-            job.get("summary"),
-            job.get("error"),
-        )
+        try:
+            await asyncio.shield(asyncio.to_thread(
+                _save_batch_job_result,
+                job_id,
+                job.get("rows", []),
+                job.get("summary"),
+                job.get("error"),
+            ))
+        except asyncio.CancelledError:
+            _save_batch_job_result(
+                job_id,
+                job.get("rows", []),
+                job.get("summary"),
+                job.get("error"),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------

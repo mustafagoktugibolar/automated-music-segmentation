@@ -237,11 +237,31 @@ export function getBatchEvalResult(jobId) {
  * @param {(result: { summary: string | null, rows: any[], error: string | null }) => void} onDone
  */
 export function subscribeToBatchEval(jobId, onLine, onDone) {
+  let closed = false;
+  let pollTimer = null;
+
+  function startPolling() {
+    if (closed) return;
+    pollTimer = setInterval(async () => {
+      if (closed) { clearInterval(pollTimer); return; }
+      try {
+        const result = await getBatchEvalResult(jobId);
+        if (result && !closed) {
+          closed = true;
+          clearInterval(pollTimer);
+          onDone({ summary: result.summary ?? null, rows: result.rows ?? [], error: result.error ?? null });
+        }
+      } catch (_) {}
+    }, 5000);
+  }
+
   const es = new EventSource(`${BACKEND_URL}/evaluation/batch/${jobId}/stream`);
   es.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
       if (data.done) {
+        closed = true;
+        clearInterval(pollTimer);
         onDone({ summary: data.summary ?? null, rows: data.rows ?? [], error: data.error ?? null });
         es.close();
       } else if (data.line !== undefined) {
@@ -251,8 +271,15 @@ export function subscribeToBatchEval(jobId, onLine, onDone) {
       console.error("SSE parse error:", e);
     }
   };
-  es.onerror = () => es.close();
-  return () => es.close();
+  es.onerror = () => {
+    es.close();
+    startPolling();
+  };
+  return () => {
+    closed = true;
+    clearInterval(pollTimer);
+    es.close();
+  };
 }
 
 /**

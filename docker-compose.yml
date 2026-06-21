@@ -71,7 +71,7 @@ services:
       music_segmentation_rabbitmq:
         condition: service_healthy
   worker-custom:
-    scale: ${CUSTOM_WORKER_REPLICAS:-3}
+    scale: ${CUSTOM_WORKER_REPLICAS:-2}
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -95,7 +95,7 @@ services:
     depends_on:
       - music_segmentation_rabbitmq
   worker-msaf-foote:
-    container_name: worker-msaf-foote
+    scale: 2
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -112,10 +112,11 @@ services:
       WORKER_TYPE: msaf_segmentation
       MESSAGE_CODE: segmentation.foote
       MSAF_ALGORITHM: foote
+      WORKER_CONCURRENCY: 1
     depends_on:
       - music_segmentation_rabbitmq
   worker-msaf-cnmf:
-    container_name: worker-msaf-cnmf
+    scale: 2
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -132,10 +133,11 @@ services:
       WORKER_TYPE: msaf_segmentation
       MESSAGE_CODE: segmentation.cnmf
       MSAF_ALGORITHM: cnmf
+      WORKER_CONCURRENCY: 1
     depends_on:
       - music_segmentation_rabbitmq
   worker-msaf-scluster:
-    container_name: worker-msaf-scluster
+    scale: 2
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -152,10 +154,11 @@ services:
       WORKER_TYPE: msaf_segmentation
       MESSAGE_CODE: segmentation.scluster
       MSAF_ALGORITHM: scluster
+      WORKER_CONCURRENCY: 1
     depends_on:
       - music_segmentation_rabbitmq
   worker-fusion:
-    container_name: worker-fusion
+    scale: 2
     image: music-segmentation-worker:latest
     build:
       context: .
@@ -171,6 +174,7 @@ services:
       SERVICE_NAME: worker-fusion
       WORKER_TYPE: fusion_segmentation
       MESSAGE_CODE: segmentation.fusion
+      WORKER_CONCURRENCY: 2
     depends_on:
       - music_segmentation_rabbitmq
   worker-dataset:

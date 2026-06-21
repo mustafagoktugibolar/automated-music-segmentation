@@ -261,7 +261,7 @@ async def list_datasets():
 async def list_tracks(
     dataset_id: str,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=476, ge=1, le=200),
     has_ground_truth: bool | None = Query(default=None),
 ):
     """List tracks within a dataset, with optional ground truth filter."""

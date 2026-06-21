@@ -20,7 +20,7 @@
   let tracks = [];
   let tracksTotal = 0;
   let page = 1;
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 476;
 
   let filterGT = false;
   let isImporting = false;
