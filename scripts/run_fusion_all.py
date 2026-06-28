@@ -28,7 +28,7 @@ from backend.db.models import SegmentationTask
 from backend.db.postgreSQL import SessionLocal
 from shared.logger import get_logger
 from shared.rabbitmq import RabbitMQClient
-from shared.segmentation_utils import BASELINE_ALGORITHMS, canonical_algorithm_name
+from shared.segmentation.utils import BASELINE_ALGORITHMS, canonical_algorithm_name
 
 logger = get_logger()
 

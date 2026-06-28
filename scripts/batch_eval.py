@@ -35,7 +35,7 @@ if _app_root not in sys.path:
     sys.path.insert(0, _app_root)
 
 # ── Imports (require librosa, mir_eval — available in worker conda env) ───────
-from workers.segmenters.segmentation_service import _analyze_content
+from workers.segmenters.custom.segmentation_service import _analyze_content
 from backend.services.salami_parser import parse_salami_annotation
 from backend.services.evaluation_service import compute_boundary_metrics
 
@@ -44,10 +44,15 @@ ANNOTATIONS_DIR = "/app/data/salami/annotations"
 METADATA_CSV    = "/app/data/salami/metadata/id_index_internetarchive.csv"
 RESULTS_CSV     = "/app/data/eval_results.csv"
 SUMMARY_TXT     = "/app/data/eval_summary.txt"
-AUDIO_CACHE_DIR = "/app/data/audio_cache"
 
 DOWNLOAD_TIMEOUT_S = 90
 WORKER_CONCURRENCY = 3
+
+# MinIO operations are now delegated to the unified adapter.
+from shared.storage.object_store import (
+    download_from_minio,
+    list_minio_song_ids,
+)
 
 
 # ── Metadata loading ──────────────────────────────────────────────────────────
@@ -89,37 +94,26 @@ def list_annotated_song_ids() -> list[str]:
     return sorted(ids, key=int)
 
 
-# ── Audio download ─────────────────────────────────────────────────────────────
+# MinIO helpers are now imported from infrastructure.storage.object_store (see top of file).
+# list_minio_song_ids and download_from_minio are available as module-level names.
 
-def download_audio(
-    url: str,
-    timeout: int = DOWNLOAD_TIMEOUT_S,
-    cache_key: Optional[str] = None,
-) -> Optional[bytes]:
-    """Download audio from URL (disk-cached by cache_key), return bytes or None."""
+
+# ── Audio download (kept for fallback / testing) ──────────────────────────────
+
+def download_audio(url: str, timeout: int = DOWNLOAD_TIMEOUT_S) -> Optional[bytes]:
+    """Download audio from URL, return raw bytes or None on failure."""
     if not url:
         return None
-    cache_path = os.path.join(AUDIO_CACHE_DIR, cache_key) if cache_key else None
-    if cache_path and os.path.exists(cache_path):
-        with open(cache_path, "rb") as f:
-            return f.read()
     try:
         req = urllib.request.Request(
             url,
             headers={"User-Agent": "music-segmentation-eval/1.0"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
+            return resp.read()
     except Exception as exc:
         print(f"    [download error] {exc}", flush=True)
         return None
-    if cache_path and data:
-        os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
-        tmp_path = cache_path + ".part"
-        with open(tmp_path, "wb") as f:
-            f.write(data)
-        os.replace(tmp_path, cache_path)
-    return data
 
 
 # ── SALAMI annotation loading ─────────────────────────────────────────────────
@@ -151,12 +145,11 @@ def load_both_annotations(song_id: str) -> list[list[dict]]:
 
 def evaluate_track(
     song_id: str,
-    url: str,
     title: str,
     tolerance: float,
 ) -> Optional[dict]:
     """
-    Download audio, run segmentation, evaluate against both SALAMI annotators.
+    Fetch audio from MinIO, run segmentation, evaluate against both SALAMI annotators.
     Returns metrics dict or None if track cannot be processed.
     """
     # Load annotations
@@ -164,12 +157,12 @@ def evaluate_track(
     if not annotations:
         return None
 
-    # Download audio
+    # Download audio from MinIO
     t_dl = time.perf_counter()
-    audio_bytes = download_audio(url, cache_key=f"{song_id}.mp3")
+    audio_bytes = download_from_minio(song_id)
     dl_time = time.perf_counter() - t_dl
     if audio_bytes is None:
-        return {"song_id": song_id, "title": title, "error": "download_failed", "dl_time_s": dl_time}
+        return {"song_id": song_id, "title": title, "error": "minio_not_found", "dl_time_s": dl_time}
 
     # Run segmentation
     t_seg = time.perf_counter()
@@ -362,22 +355,24 @@ def main() -> None:
     print(f"  concurrency: {args.concurrency}", flush=True)
     print(flush=True)
 
-    # Load metadata
+    # Load metadata CSV for titles (optional — used only for display)
     meta = load_metadata()
     print(f"Metadata loaded: {len(meta)} entries", flush=True)
 
-    # Get annotated song IDs
-    song_ids = list_annotated_song_ids()
-    print(f"Annotated songs: {len(song_ids)}", flush=True)
+    # List songs available in MinIO
+    minio_ids = list_minio_song_ids()
+    print(f"MinIO songs    : {len(minio_ids)}", flush=True)
 
-    # Keep only songs that have an audio URL in metadata
-    candidates = []
-    for sid in song_ids:
-        m = meta.get(sid)
-        if m and m.get("url"):
-            candidates.append(sid)
+    if not minio_ids:
+        print("ERROR: No songs found in MinIO. Check S3_BUCKET_RAW / S3_ACCESS_KEY env vars.", flush=True)
+        return
 
-    print(f"Songs with URL : {len(candidates)}", flush=True)
+    # Intersect with annotated song IDs
+    annotated_ids = set(list_annotated_song_ids())
+    print(f"Annotated      : {len(annotated_ids)} songs", flush=True)
+
+    candidates = [sid for sid in minio_ids if sid in annotated_ids]
+    print(f"Overlap        : {len(candidates)} tracks (in MinIO AND annotated)", flush=True)
 
     if args.max_tracks and args.max_tracks > 0:
         candidates = candidates[: args.max_tracks]
@@ -393,8 +388,7 @@ def main() -> None:
             pool.submit(
                 evaluate_track,
                 sid,
-                meta[sid]["url"],
-                meta[sid]["title"],
+                meta.get(sid, {}).get("title", sid),
                 args.tolerance,
             ): sid
             for sid in candidates
@@ -403,6 +397,7 @@ def main() -> None:
         for fut in as_completed(futures):
             sid = futures[fut]
             completed += 1
+            title = meta.get(sid, {}).get("title", sid)
             try:
                 result = fut.result()
                 if result:
@@ -410,10 +405,10 @@ def main() -> None:
                     status = result.get("error") or f"F1={result.get('f_measure', 0):.3f}"
                     print(f"  [{completed:>3}/{len(candidates)}] {sid:>6}  {status}", flush=True)
                 else:
-                    rows.append({"song_id": sid, "title": meta[sid]["title"], "error": "no_annotation"})
+                    rows.append({"song_id": sid, "title": title, "error": "no_annotation"})
                     print(f"  [{completed:>3}/{len(candidates)}] {sid:>6}  skip (no annotation)", flush=True)
             except Exception as exc:
-                rows.append({"song_id": sid, "title": meta[sid]["title"], "error": str(exc)})
+                rows.append({"song_id": sid, "title": title, "error": str(exc)})
                 print(f"  [{completed:>3}/{len(candidates)}] {sid:>6}  ERROR: {exc}", flush=True)
 
     # Generate and print report

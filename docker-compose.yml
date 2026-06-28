@@ -79,7 +79,10 @@ services:
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared
+      - ./scripts:/app/scripts
       - ./logs:/app/logs
+      - ./data:/app/data
+      - ./models:/app/models
       - media_data:/app/media
     env_file:
       - ./.env
@@ -177,24 +180,6 @@ services:
       WORKER_CONCURRENCY: 2
     depends_on:
       - music_segmentation_rabbitmq
-  worker-dataset:
-    container_name: worker-dataset
-    image: music-segmentation-worker:latest
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
-    volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
-      - ./logs:/app/logs
-      - media_data:/app/media
-    env_file:
-      - ./.env
-    environment:
-      SERVICE_NAME: worker-dataset
-    depends_on:
-      - music_segmentation_rabbitmq
-    command: ["python", "workers/run_dataset.py"]
   worker-llm-1:
     container_name: worker-llm-1
     image: music-segmentation-worker:latest

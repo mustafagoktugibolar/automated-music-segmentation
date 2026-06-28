@@ -39,6 +39,7 @@
   let file = null;
   let selected = new Set(["custom_librosa"]);
   let llmMode = "deterministic";
+  let labelingMethod = "heuristic";
 
   // Confirmation modal for LLM
   let showLLMConfirm = false;
@@ -149,9 +150,10 @@
     }
     algoStartTimes = { ...algoStartTimes };
 
+    const customParams = { labeling_method: labelingMethod };
     const params = selected.has("llm")
-      ? { llm_segmentation: { mode: llmMode } }
-      : null;
+      ? { llm_segmentation: { mode: llmMode }, custom: customParams, custom_librosa: customParams }
+      : { custom: customParams, custom_librosa: customParams };
 
     isUploading = true;
     status = "uploading";
@@ -371,6 +373,19 @@
                 {/if}
               </button>
             {/each}
+          </div>
+
+          <!-- Labeling method selector (always visible) -->
+          <div class="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5">
+            <label class="text-[11px] font-medium text-zinc-400" for="labeling-method">Segment labeling</label>
+            <select
+              id="labeling-method"
+              class="mt-1.5 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+              bind:value={labelingMethod}
+            >
+              <option value="heuristic">Heuristic (fast)</option>
+              <option value="ml">ML — Gradient Boosted Trees</option>
+            </select>
           </div>
 
           {#if selected.has("llm")}

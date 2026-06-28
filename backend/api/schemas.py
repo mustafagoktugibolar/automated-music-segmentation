@@ -26,6 +26,7 @@ class CustomSegmentationParams(BaseModel):
     feature_fusion_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     feature_fusion_merge_window_seconds: float | None = Field(default=None, gt=0, le=20)
     semantic_labeling_enabled: bool | None = None
+    labeling_method: Literal["heuristic", "ml"] | None = None
     n_clusters: int | None = Field(default=None, ge=1, le=26)
     # Feature extraction
     use_mfcc: bool | None = None

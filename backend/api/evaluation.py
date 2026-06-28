@@ -29,7 +29,7 @@ from backend.services.evaluation_service import compute_boundary_metrics, comput
 from backend.services.salami_parser import parse_salami_annotation
 from backend.services.segmentation_orchestrator import SegmentationOrchestrator
 from shared.logger import get_logger
-from shared.segmentation_utils import BASELINE_ALGORITHMS, canonical_algorithm_name, extract_segments
+from shared.segmentation.utils import BASELINE_ALGORITHMS, canonical_algorithm_name, extract_segments
 
 logger = get_logger()
 router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
@@ -85,61 +85,14 @@ def _download_audio(url: str, timeout: int = 90) -> Optional[bytes]:
         return None
 
 
-def _minio_client():
-    """Return a boto3 S3 client pointed at MinIO, or None if not configured."""
-    import boto3
-    s3_key    = os.getenv("S3_ACCESS_KEY")
-    s3_secret = os.getenv("S3_SECRET_KEY")
-    s3_bucket = os.getenv("S3_BUCKET_RAW")
-    if not (s3_key and s3_secret and s3_bucket):
-        return None, None
-    session = boto3.session.Session()
-    client = session.client(
-        "s3",
-        aws_access_key_id=s3_key,
-        aws_secret_access_key=s3_secret,
-        endpoint_url=os.getenv("S3_ENDPOINT") or None,
-    )
-    return client, s3_bucket
-
-
 def _list_minio_song_ids() -> list[str]:
-    """List numeric song IDs whose .mp3 is present in the configured MinIO bucket."""
-    client, bucket = _minio_client()
-    if client is None:
-        return []
-    try:
-        paginator = client.get_paginator("list_objects_v2")
-        song_ids: set[str] = set()
-        for page in paginator.paginate(Bucket=bucket):
-            for obj in page.get("Contents", []):
-                name = obj["Key"].rsplit("/", 1)[-1]
-                if name.endswith(".mp3"):
-                    sid = name[:-4]
-                    if sid.isdigit():
-                        song_ids.add(sid)
-        return sorted(song_ids, key=int)
-    except Exception as exc:
-        logger.warning("MinIO list failed: %s", exc)
-        return []
+    from shared.storage.object_store import list_song_ids
+    return list_song_ids()
 
 
 def _download_from_minio(song_id: str) -> Optional[bytes]:
-    """Download audio bytes for song_id from MinIO. Returns None on failure."""
-    client, bucket = _minio_client()
-    if client is None:
-        return None
-    prefix = os.getenv("DATASET_PREFIX", "").strip().strip("/")
-    candidates = [f"songs/{song_id}.mp3", f"{song_id}.mp3"]
-    if prefix:
-        candidates.append(f"{prefix}/songs/{song_id}.mp3")
-    for key in candidates:
-        try:
-            resp = client.get_object(Bucket=bucket, Key=key)
-            return resp["Body"].read()
-        except Exception:
-            continue
-    return None
+    from shared.storage.object_store import download
+    return download(song_id)
 
 
 def _dispatch_to_worker(

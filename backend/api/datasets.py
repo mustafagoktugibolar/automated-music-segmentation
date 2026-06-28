@@ -388,7 +388,7 @@ async def upload_track(
     blob_name = f"user-datasets/{dataset_id}/{track_id}/{file.filename}"
 
     try:
-        from shared.blob_helper import AzureBlobCacheHelper
+        from shared.storage.blob_helper import AzureBlobCacheHelper
         helper = AzureBlobCacheHelper()
         container = os.getenv("AZURE_STORAGE_CONTAINER_RAW", "").strip()
 

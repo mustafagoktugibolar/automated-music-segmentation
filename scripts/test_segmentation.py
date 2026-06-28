@@ -127,7 +127,7 @@ def main() -> None:
     print(f"Params: {params}\n")
 
     # --- Run pipeline ---
-    from workers.segmenters.segmentation_service import process_file_path
+    from workers.segmenters.custom.segmentation_service import process_file_path
 
     t_start = time.perf_counter()
     result  = process_file_path(args.audio, params=params)

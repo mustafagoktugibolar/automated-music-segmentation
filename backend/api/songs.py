@@ -5,7 +5,7 @@ import requests
 from fastapi.responses import StreamingResponse
 from typing import List, Optional
 import os
-import boto3
+
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -102,25 +102,15 @@ async def segment_batch(req: SegmentBatchRequest):
 @router.get("/stream/{song_id}")
 async def stream_song(song_id: str):
     # This endpoint only supports streaming from S3/MinIO. No external URL or local fallbacks.
-    s3_endpoint = os.getenv("S3_ENDPOINT")
-    s3_key = os.getenv("S3_ACCESS_KEY")
-    s3_secret = os.getenv("S3_SECRET_KEY")
-    s3_bucket = os.getenv("S3_BUCKET_RAW")
+    from shared.storage.object_store import get_client_and_bucket
+    s3_client, s3_bucket = get_client_and_bucket()
+    prefix = os.getenv("DATASET_PREFIX", "").strip().strip("/")
 
-    if not (s3_bucket and s3_key and s3_secret):
+    if s3_client is None:
         raise HTTPException(status_code=500, detail="S3/MinIO storage is not configured for streaming")
 
     try:
-        session = boto3.session.Session()
-        s3_client = session.client(
-            "s3",
-            aws_access_key_id=s3_key,
-            aws_secret_access_key=s3_secret,
-            endpoint_url=s3_endpoint or None,
-        )
-
         candidate_keys = [f"songs/{song_id}.mp3", f"{song_id}.mp3"]
-        prefix = os.getenv("DATASET_PREFIX", "").strip().strip("/")
         if prefix:
             candidate_keys.append(f"{prefix}/songs/{song_id}.mp3")
 

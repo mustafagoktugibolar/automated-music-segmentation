@@ -1,6 +1,13 @@
 # Generated audio files and uploads
 /data/audio/
+/data/audio_cache/
 /media/uploads/
+
+# Evaluation outputs (generated, not source)
+/data/eval_*.csv
+/data/eval_*.txt
+/data/eval_runs/
+data/label_training/
 
 # Logs and caches
 /logs/
@@ -11,6 +18,10 @@
 
 # macOS
 .DS_Store
+**/.DS_Store
+
+# Word/Office temp files
+docs/~$*
 
 # Node
 /frontend/music-segmentation-ui/node_modules/
@@ -133,3 +144,7 @@ dmypy.json
 .pyre/
 
 node_modules/
+
+# Trained ML models (binary, not committed)
+/models/*.joblib
+/models/*.json

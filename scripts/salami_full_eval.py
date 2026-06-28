@@ -30,15 +30,15 @@ for p in (_app, _here):
 
 import numpy as np
 
-from workers.segmenters.segmentation_service import _analyze_content
-from workers.segmenters.fusion_service import fuse_algorithm_results
-from shared.segmentation_utils import (
+from workers.segmenters.custom.segmentation_service import _analyze_content
+from workers.segmenters.fusion.fusion_service import fuse_algorithm_results
+from shared.segmentation.utils import (
     normalize_algorithm_result,
     boundaries_to_segments,
     normalize_boundaries,
     get_audio_duration,
 )
-from shared.labeling import apply_two_layer_labels
+from shared.labeling.heuristic import apply_two_layer_labels
 from backend.services.salami_parser import parse_salami_annotation
 from backend.services.evaluation_service import compute_boundary_metrics
 

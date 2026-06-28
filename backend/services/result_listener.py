@@ -10,7 +10,7 @@ from backend.db.models import Base, SegmentationTask
 from shared.config import DBSettings
 from shared.logger import get_logger
 from shared.rabbitmq import RabbitMQClient
-from shared.segmentation_utils import (
+from shared.segmentation.utils import (
     BASELINE_ALGORITHMS,
     canonical_algorithm_name,
     extract_segments,

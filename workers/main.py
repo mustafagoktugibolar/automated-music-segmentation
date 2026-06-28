@@ -1,10 +1,10 @@
 import os
 import sys
 from shared.logger import get_logger
-from workers.segmenters.msaf_worker import MSAFWorker
-from workers.segmenters.custom_worker import CustomWorker
-from workers.segmenters.llm_segmentation_worker import LLMSegmentationWorker
-from workers.segmenters.fusion_worker import FusionWorker
+from workers.segmenters.msaf.msaf_worker import MSAFWorker
+from workers.segmenters.custom.custom_worker import CustomWorker
+from workers.segmenters.llm.llm_segmentation_worker import LLMSegmentationWorker
+from workers.segmenters.fusion.fusion_worker import FusionWorker
 
 logger = get_logger()
 

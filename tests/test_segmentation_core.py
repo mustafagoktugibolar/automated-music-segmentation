@@ -11,7 +11,7 @@ from shared.segmentation_utils import (
     segments_to_internal_boundaries,
     segments_to_intervals,
 )
-from workers.segmenters.fusion_service import fuse_algorithm_results
+from workers.segmenters.fusion.fusion_service import fuse_algorithm_results
 
 
 class SegmentationUtilityTests(unittest.TestCase):

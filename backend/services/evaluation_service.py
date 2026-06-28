@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from shared.evaluation_metrics import (
+from shared.segmentation.metrics import (
     compute_boundary_metrics_at_tolerance,
     compute_multi_tolerance_metrics,
     compute_segment_iou,
     greedy_boundary_match,
 )
-from shared.segmentation_utils import segments_to_internal_boundaries, segments_to_intervals
+from shared.segmentation.utils import segments_to_internal_boundaries, segments_to_intervals
 
 
 def _extract_boundaries(segments: list[dict], edge_margin: float = 0.5) -> np.ndarray:

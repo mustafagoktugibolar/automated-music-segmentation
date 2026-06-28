@@ -8,10 +8,10 @@ import aiofiles
 from backend.api.schemas import ALLOWED_ALGORITHMS, SegmentationParams
 from backend.db.models import SegmentationTask
 from backend.db.postgreSQL import SessionLocal
-from shared.blob_helper import AzureBlobCacheHelper
+from shared.storage.blob_helper import AzureBlobCacheHelper
 from shared.logger import get_logger
 from shared.rabbitmq import RabbitMQClient
-from shared.segmentation_utils import BASELINE_ALGORITHMS, canonical_algorithm_name
+from shared.segmentation.utils import BASELINE_ALGORITHMS, canonical_algorithm_name
 
 logger = get_logger()
 
@@ -148,18 +148,6 @@ class SegmentationOrchestrator:
                 routing_key=key,
                 message=task_payload,
             )
-
-    def list_available_songs(self) -> list[SongInfo]:
-        from backend.services.dataset_worker import get_available_songs
-        
-        songs_data = get_available_songs()
-        songs: list[SongInfo] = []
-
-        for s in songs_data:
-            songs.append(SongInfo(song_id=s.song_id, url=s.archive_path))
-
-        songs.sort(key=lambda s: s.song_id)
-        return songs
 
     async def process_upload(self, file, requested_algos: list[str], params: SegmentationParams | None = None, webhook_url: str | None = None) -> str:
         algorithms = self._normalize_algorithms(requested_algos)
