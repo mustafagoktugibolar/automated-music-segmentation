@@ -1,0 +1,16 @@
+true,predicted,count
+Chorus,Verse,60
+Chorus,Instrumental,52
+Verse,Chorus,44
+Other,Instrumental,43
+Verse,Instrumental,37
+Instrumental,Chorus,33
+Instrumental,Other,28
+Other,Chorus,25
+Other,Verse,24
+Instrumental,Verse,21
+Chorus,Other,14
+Verse,Other,14
+Outro,Instrumental,10
+Other,Intro,8
+Intro,Other,7

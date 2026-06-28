@@ -170,6 +170,8 @@ def main() -> None:
     parser.add_argument("--annotators", nargs="+", type=int, default=[1, 2],
                         help="SALAMI annotator indices to try (default: 1 2).")
     parser.add_argument("--output",     default=OUTPUT_PARQUET)
+    parser.add_argument("--workers",    type=int, default=4,
+                        help="Parallel worker processes (default: 4).")
     args = parser.parse_args()
 
     entries = _load_salami_entries(args.annotators, args.max_songs)
@@ -177,22 +179,29 @@ def main() -> None:
         print("No songs found. Check annotations dir and MinIO/audio_cache.")
         sys.exit(1)
 
-    print(f"\nExtracting features for {len(entries)} songs …")
+    print(f"\nExtracting features for {len(entries)} songs  (workers={args.workers}) …")
     all_rows: list[dict] = []
     t0 = time.perf_counter()
-    for i, entry in enumerate(entries):
-        t_song = time.perf_counter()
-        rows = _extract_rows(entry)
-        song_elapsed = time.perf_counter() - t_song
-        if rows:
-            all_rows.extend(rows)
-            if (i + 1) % 10 == 0 or i + 1 == len(entries):
-                total = time.perf_counter() - t0
+
+    from concurrent.futures import ThreadPoolExecutor as _Executor, as_completed
+    import traceback as _tb
+    with _Executor(max_workers=args.workers) as pool:
+        futures = {pool.submit(_extract_rows, entry): entry for entry in entries}
+        done = 0
+        for fut in as_completed(futures):
+            try:
+                rows = fut.result()
+            except Exception:
+                _tb.print_exc()
+                rows = []
+            done += 1
+            if rows:
+                all_rows.extend(rows)
+            if done % 10 == 0 or done == len(entries):
                 print(
-                    f"  {i + 1}/{len(entries)}  "
+                    f"  {done}/{len(entries)}  "
                     f"segments: {len(all_rows)}  "
-                    f"last song: {song_elapsed:.2f}s  "
-                    f"total: {total:.1f}s"
+                    f"elapsed: {time.perf_counter() - t0:.1f}s"
                 )
 
     if not all_rows:

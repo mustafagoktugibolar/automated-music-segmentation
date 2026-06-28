@@ -2,20 +2,23 @@
 Segment-level feature vectors for ML-based label classification.
 
 Wraps the existing ``build_segment_descriptors`` from ``shared.labeling``
-(acoustic features: chroma/MFCC/RMS/onset, 54-dim) and augments the
-vector with contextual features that the heuristic rule-set uses implicitly
+(acoustic features: chroma/MFCC/RMS/onset/beat/spectral, 60-dim) and augments
+the vector with contextual features that the heuristic rule-set uses implicitly
 (position, duration, energy rank, repetition count).
 
 The *same* function is called at both **training** time (ground-truth
 segments) and **inference** time (predicted segments) so that the feature
 space is identical in both settings.
 
-Feature layout (67 total)
+Feature layout (73 total)
 --------------------------
 [0:54]  acoustic  — chroma_mean×12, chroma_std×12, mfcc_mean×13,
                     mfcc_std×13, rms_mean, rms_std, onset_density,
                     norm_duration
-[54:67] context   — positional / repetition features (see _CONTEXT_NAMES)
+[54:60] rhythm    — tempo_norm, beat_density_norm, beat_regularity,
+                    spectral_centroid_mean_norm, spectral_centroid_std_norm,
+                    zcr_mean
+[60:73] context   — positional / repetition features (see _CONTEXT_NAMES)
 """
 from __future__ import annotations
 
@@ -35,7 +38,7 @@ from collections import Counter
 #  norm_duration[53]
 #  ─────────────────────
 #  total                 54
-_ACOUSTIC_DIM = 54
+_ACOUSTIC_DIM = 60
 _RMS_MEAN_IDX = 50  # must stay in sync with shared.labeling._RMS_IDX
 
 _CONTEXT_NAMES: list[str] = [
@@ -54,7 +57,7 @@ _CONTEXT_NAMES: list[str] = [
     "is_repeated",         # 12 1 if repetition_count >= 2
 ]
 _CONTEXT_DIM = len(_CONTEXT_NAMES)
-_TOTAL_DIM = _ACOUSTIC_DIM + _CONTEXT_DIM  # 67
+_TOTAL_DIM = _ACOUSTIC_DIM + _CONTEXT_DIM  # 73
 
 
 def build_segment_label_vectors(
@@ -167,5 +170,9 @@ def feature_names() -> list[str]:
     for d in range(13):
         names.append(f"mfcc_std_{d}")
     names += ["rms_mean", "rms_std", "onset_density", "norm_duration"]
+    names += [
+        "tempo_norm", "beat_density_norm", "beat_regularity",
+        "spectral_centroid_mean_norm", "spectral_centroid_std_norm", "zcr_mean",
+    ]
     names += _CONTEXT_NAMES
-    return names  # 54 acoustic + 13 context = 67
+    return names  # 60 acoustic + 13 context = 73
