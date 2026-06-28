@@ -1,0 +1,4 @@
+merge_mode,n_classes,n_features,train_macro_f1,val_macro_f1,test_macro_f1,val_test_gap,test_f1_mean,test_f1_std,test_f1_bridge,test_f1_chorus,test_f1_instrumental,test_f1_intro,test_f1_other,test_f1_outro,test_f1_pre-chorus,test_f1_silence,test_f1_verse,smooth_test_macro_f1,test_f1_transition
+none,9,87,0.9862,0.5387,0.5558,-0.0171,0.5558,,0.2553,0.4352,0.6188,0.7677,0.7352,0.6087,0.0,0.9701,0.6109,0.5389054495156154,
+transition,8,87,0.9964,0.6125,0.6178,-0.0053,0.6178,,,0.4494,0.605,0.7538,0.722,0.6143,,0.9701,0.6208,0.6126358418942919,0.2073
+other,7,87,0.9997,0.6793,0.6697,0.0096,0.6697,,,0.4757,0.6416,0.766,0.6154,0.6029,,0.9735,0.6126,0.6876965745879973,

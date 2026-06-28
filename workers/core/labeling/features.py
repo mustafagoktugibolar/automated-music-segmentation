@@ -80,6 +80,11 @@ _CONTRAST_DIM = len(_CONTRAST_NAMES)  # 8
 
 _TOTAL_DIM = _ACOUSTIC_DIM + _CONTEXT_DIM + _REPETITION_DIM + _CONTRAST_DIM  # 87
 
+# Minimum number of other segments with chroma similarity > 0.8 for a segment to be
+# flagged as acoustically repeated. >= 1 means the section appears at least twice in
+# the track (self is excluded from the count).
+_ACOUSTIC_REPEAT_THRESHOLD = 1
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,7 +137,7 @@ def _acoustic_repetition_features(acoustic: np.ndarray) -> np.ndarray:
         out[i] = [
             max_c, mean_top3_c, max_m, mean_top3_m,
             float(cnt_c), float(cnt_m), nearest_dist,
-            1.0 if cnt_c >= 2 else 0.0,
+            1.0 if cnt_c >= _ACOUSTIC_REPEAT_THRESHOLD else 0.0,
         ]
 
     return out

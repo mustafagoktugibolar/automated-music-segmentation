@@ -79,68 +79,80 @@ def _print_report(title: str, y_true: list[str], y_pred: list[str]) -> None:
 # ── Mode (a): clean accuracy from parquet ────────────────────────────────────
 
 def eval_clean_parquet(test_size: float) -> None:
-    """Evaluate using held-out rows from the training parquet (fast, no audio)."""
+    """Evaluate using held-out rows from the training parquet (fast, no audio).
+
+    Uses bundle["feature_names"] to select columns from parquet directly —
+    no segment dict reconstruction, no build_segment_label_vectors() call.
+    """
+    import joblib
     import pandas as pd
     from sklearn.model_selection import GroupShuffleSplit
-    from shared.labeling.ml import predict_semantic_labels
-    from shared.labeling.heuristic import assign_semantic_labels, build_segment_descriptors
-    from workers.segmenters.llm.music_segmentation_agent.salami.label_normalizer import normalize_label
+    from shared.labeling.heuristic import assign_semantic_labels
 
     if not os.path.exists(PARQUET_PATH):
         print(f"Parquet not found: {PARQUET_PATH}. Run prepare_label_dataset.py first.")
         return
 
-    df = pd.read_parquet(PARQUET_PATH)
-    meta_cols    = {"song_id", "dataset", "segment_idx", "start", "end", "label"}
-    feature_cols = [c for c in df.columns if c not in meta_cols]
-
-    X      = df[feature_cols].values.astype(np.float32)
-    labels = df["label"].values
-    groups = df["song_id"].values
-
-    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
-    _, test_idx = next(gss.split(X, labels, groups=groups))
-
-    df_test = df.iloc[test_idx]
-    print(f"Clean eval: {len(df_test)} segments from {df_test['song_id'].nunique()} songs.")
-
-    # ML predictions: reconstruct segment dicts + descriptors per song.
-    y_true_ml   : list[str] = []
-    y_pred_ml   : list[str] = []
-    y_pred_heur : list[str] = []
-
-    from shared.labeling.features import build_segment_label_vectors
-    import joblib, os as _os
-
-    model_path = _os.path.join(_app_root, "models", "segment_label_clf.joblib")
-    if not _os.path.exists(model_path):
+    model_path = os.path.join(_app_root, "models", "segment_label_clf.joblib")
+    if not os.path.exists(model_path):
         print(f"Model not found at {model_path}. Run train_label_classifier.py first.")
         return
 
     bundle = joblib.load(model_path)
-    clf = bundle["clf"]
-    le  = bundle["label_encoder"]
+    clf            = bundle["clf"]
+    le             = bundle["label_encoder"]
+    model_features = bundle.get("feature_names", [])
+    if not model_features:
+        raise RuntimeError("bundle['feature_names'] is missing or empty.")
 
-    for song_id, grp in df_test.groupby("song_id"):
+    df = pd.read_parquet(PARQUET_PATH)
+    meta_cols = {
+        "song_id", "raw_track_id", "annotator_id",
+        "dataset", "segment_idx", "start", "end", "label",
+    }
+
+    missing = [f for f in model_features if f not in df.columns]
+    if missing:
+        raise RuntimeError(
+            f"Parquet is missing {len(missing)} feature column(s) expected by the model. "
+            f"Re-run prepare_label_dataset.py to rebuild.\n  Missing: {missing[:10]}"
+        )
+
+    group_col = "raw_track_id" if "raw_track_id" in df.columns else "song_id"
+
+    X      = df[model_features].values.astype(np.float32)
+    labels = df["label"].values
+    groups = df[group_col].values
+
+    if X.shape[1] != len(model_features):
+        raise RuntimeError(
+            f"Feature shape mismatch: parquet gave {X.shape[1]} columns, "
+            f"model expects {len(model_features)}."
+        )
+
+    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
+    _, test_idx = next(gss.split(X, labels, groups=groups))
+
+    df_test  = df.iloc[test_idx]
+    n_groups = df_test[group_col].nunique()
+    print(
+        f"Clean eval: {len(df_test)} segments from {n_groups} {group_col}s  "
+        f"(group_col={group_col}, features={len(model_features)})."
+    )
+
+    # ML: feed parquet features directly — no fake segment dicts, no re-computation.
+    X_test    = X[test_idx]
+    preds     = le.inverse_transform(clf.predict(X_test))
+    y_true_ml = df_test["label"].tolist()
+    y_pred_ml = preds.tolist()
+
+    # Heuristic: positional-only (no audio).
+    y_pred_heur: list[str] = []
+    for _sid, grp in df_test.groupby("song_id"):
         grp = grp.sort_values("segment_idx")
-        segments = [
-            {"start": r["start"], "end": r["end"],
-             "structural_label": chr(65), "label": chr(65)}
-            for _, r in grp.iterrows()
-        ]
-        descriptors = grp[feature_cols].values.astype(np.float32)
-
-        # ML
-        X_seg, _ = build_segment_label_vectors(segments, descriptors=descriptors)
-        preds   = le.inverse_transform(clf.predict(X_seg))
-        y_pred_ml.extend(preds.tolist())
-
-        # Heuristic (no audio, no descriptor → positional only)
+        segments = [{"start": r["start"], "end": r["end"]} for _, r in grp.iterrows()]
         heur_segs = assign_semantic_labels(segments)
         y_pred_heur.extend(s.get("semantic_label", "Unknown") for s in heur_segs)
-
-        # Ground truth
-        y_true_ml.extend(grp["label"].tolist())
 
     _print_report("ML classifier (clean — GT boundaries, parquet split)", y_true_ml, y_pred_ml)
     _print_report("Heuristic     (clean — GT boundaries, parquet split)", y_true_ml, y_pred_heur)

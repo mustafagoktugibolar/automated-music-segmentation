@@ -19,8 +19,8 @@
   },
   "Other": {
     "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
+    "recall": 0.9987577639751553,
+    "f1-score": 0.9993784959602238,
     "support": 805.0
   },
   "Outro": {
@@ -30,9 +30,9 @@
     "support": 169.0
   },
   "Silence": {
-    "precision": 1.0,
+    "precision": 0.9976303317535545,
     "recall": 1.0,
-    "f1-score": 1.0,
+    "f1-score": 0.9988137603795967,
     "support": 421.0
   },
   "Verse": {
@@ -41,17 +41,17 @@
     "f1-score": 1.0,
     "support": 682.0
   },
-  "accuracy": 1.0,
+  "accuracy": 0.9997360084477297,
   "macro avg": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
+    "precision": 0.9996614759647935,
+    "recall": 0.9998225377107365,
+    "f1-score": 0.9997417509056887,
     "support": 3788.0
   },
   "weighted avg": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
+    "precision": 0.9997366340201285,
+    "recall": 0.9997360084477297,
+    "f1-score": 0.999736082990441,
     "support": 3788.0
   }
 }

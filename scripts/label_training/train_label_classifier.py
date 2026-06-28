@@ -611,6 +611,11 @@ def main() -> None:
     joblib.dump(bundle, args.output_model)
     print(f"\nModel saved → {args.output_model}")
 
+    # Mode-specific copy so sequence_smooth.py can load the right model per mode.
+    mode_model_path = os.path.join(MODELS_DIR, f"segment_label_clf_{args.merge_mode}.joblib")
+    joblib.dump(bundle, mode_model_path)
+    print(f"Mode-specific model saved → {mode_model_path}")
+
     # ── Build meta ────────────────────────────────────────────────────────────
     multi_summary: dict = {}
     if seed_rows:
@@ -630,6 +635,10 @@ def main() -> None:
         "dataset":              args.input,
         "backend":              args.backend,
         "merge_mode":           args.merge_mode,
+        "group_col":            group_col,
+        "unique_song_ids":      int(df["song_id"].nunique()),
+        "unique_raw_track_ids": int(df["raw_track_id"].nunique()) if "raw_track_id" in df.columns else None,
+        "unique_annotator_ids": sorted(df["annotator_id"].unique().tolist()) if "annotator_id" in df.columns else None,
         "classes":              list(le.classes_),
         "feature_count":        len(feature_cols),
         "primary_seed":         primary_seed,
@@ -637,9 +646,9 @@ def main() -> None:
         "leakage_check_passed": True,
         "val_size":             args.val_size,
         "test_size":            args.test_size,
-        "n_train_songs":        len(train_songs),
-        "n_val_songs":          len(val_songs),
-        "n_test_songs":         len(test_songs),
+        "n_train_groups":       len(train_groups),
+        "n_val_groups":         len(val_groups),
+        "n_test_groups":        len(test_groups),
         "n_train_segs":         int(len(X_train)),
         "n_val_segs":           int(len(X_val)),
         "n_test_segs":          int(len(X_test)),

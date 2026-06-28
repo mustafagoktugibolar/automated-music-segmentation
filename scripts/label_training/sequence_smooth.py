@@ -178,7 +178,10 @@ def run_mode(merge_mode: str, seed: int, val_size: float, test_size: float) -> d
         groups, val_size=val_size, test_size=test_size, random_state=seed,
     )
 
-    bundle = joblib.load(MODEL_JOBLIB)
+    mode_model_path = os.path.join(_app_root, "models", f"segment_label_clf_{merge_mode}.joblib")
+    model_path = mode_model_path if os.path.exists(mode_model_path) else MODEL_JOBLIB
+    print(f"Loading model: {os.path.basename(model_path)}")
+    bundle = joblib.load(model_path)
     clf    = bundle["clf"]
 
     # ── Learn transition from training sequences ───────────────────────────────
@@ -212,8 +215,8 @@ def run_mode(merge_mode: str, seed: int, val_size: float, test_size: float) -> d
     # ── Update bundle with transition matrix ───────────────────────────────────
     bundle["transition_matrix"]  = np.exp(log_trans).tolist()
     bundle["transition_classes"] = list(le.classes_)
-    joblib.dump(bundle, MODEL_JOBLIB)
-    print(f"Bundle updated with transition_matrix → {MODEL_JOBLIB}")
+    joblib.dump(bundle, model_path)
+    print(f"Bundle updated with transition_matrix → {model_path}")
 
     return metrics
 

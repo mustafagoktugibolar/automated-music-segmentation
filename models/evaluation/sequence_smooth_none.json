@@ -1,0 +1,34 @@
+{
+  "without_smoothing": {
+    "accuracy": 0.6274658573596358,
+    "macro_f1": 0.5557666570190352,
+    "per_class": {
+      "Bridge": 0.2553,
+      "Chorus": 0.4352,
+      "Instrumental": 0.6188,
+      "Intro": 0.7677,
+      "Other": 0.7352,
+      "Outro": 0.6087,
+      "Pre-Chorus": 0.0,
+      "Silence": 0.9701,
+      "Verse": 0.6109
+    }
+  },
+  "with_smoothing": {
+    "accuracy": 0.633535660091047,
+    "macro_f1": 0.5389054495156154,
+    "per_class": {
+      "Bridge": 0.0286,
+      "Chorus": 0.4795,
+      "Instrumental": 0.5914,
+      "Intro": 0.764,
+      "Other": 0.7434,
+      "Outro": 0.6573,
+      "Pre-Chorus": 0.0,
+      "Silence": 0.9669,
+      "Verse": 0.619
+    }
+  },
+  "merge_mode": "none",
+  "seed": 42
+}

@@ -1,0 +1,30 @@
+{
+  "without_smoothing": {
+    "accuracy": 0.650227617602428,
+    "macro_f1": 0.6696772491264161,
+    "per_class": {
+      "Chorus": 0.4757,
+      "Instrumental": 0.6416,
+      "Intro": 0.766,
+      "Other": 0.6154,
+      "Outro": 0.6029,
+      "Silence": 0.9735,
+      "Verse": 0.6126
+    }
+  },
+  "with_smoothing": {
+    "accuracy": 0.6623672230652504,
+    "macro_f1": 0.6876965745879973,
+    "per_class": {
+      "Chorus": 0.5192,
+      "Instrumental": 0.6243,
+      "Intro": 0.7977,
+      "Other": 0.5995,
+      "Outro": 0.6418,
+      "Silence": 0.9701,
+      "Verse": 0.6613
+    }
+  },
+  "merge_mode": "other",
+  "seed": 42
+}

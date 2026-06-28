@@ -18,8 +18,9 @@ Run from repo root or inside the worker container:
 Output
 ------
     data/label_training/segments.parquet
-        columns: song_id, dataset, segment_idx, start, end, label,
-                 + 67 feature columns (acoustic + contextual)
+        columns: song_id, raw_track_id, annotator_id, dataset,
+                 segment_idx, start, end, label,
+                 + 87 feature columns (acoustic + contextual + repetition + contrast)
 """
 from __future__ import annotations
 

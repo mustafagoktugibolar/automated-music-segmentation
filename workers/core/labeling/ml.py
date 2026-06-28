@@ -151,6 +151,15 @@ def predict_semantic_labels(
             file_path=file_path,
         )
 
+        model_features = bundle.get("feature_names", [])
+        if model_features and X.shape[1] != len(model_features):
+            logger.warning(
+                "Feature count mismatch: model expects %d features but got %d. "
+                "Re-run prepare_label_dataset.py and retrain. Falling back to heuristic.",
+                len(model_features), X.shape[1],
+            )
+            return _heuristic_fallback()
+
         if X.shape[0] == 0:
             return list(segments)
 
