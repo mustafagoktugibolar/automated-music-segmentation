@@ -260,11 +260,9 @@ async def list_datasets():
 @router.get("/{dataset_id}/tracks")
 async def list_tracks(
     dataset_id: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=476, ge=1, le=200),
     has_ground_truth: bool | None = Query(default=None),
 ):
-    """List tracks within a dataset, with optional ground truth filter."""
+    """List all tracks within a dataset, with optional ground truth filter."""
 
     def _list():
         db = SessionLocal()
@@ -273,13 +271,10 @@ async def list_tracks(
             if has_ground_truth is not None:
                 q = q.filter(DatasetTrack.has_ground_truth == has_ground_truth)
 
-            total = q.count()
-            tracks = q.offset((page - 1) * page_size).limit(page_size).all()
+            tracks = q.all()
 
             return {
-                "total": total,
-                "page": page,
-                "page_size": page_size,
+                "total": len(tracks),
                 "tracks": [
                     {
                         "track_id": t.track_id,

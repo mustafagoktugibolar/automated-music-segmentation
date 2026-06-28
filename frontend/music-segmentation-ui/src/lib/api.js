@@ -63,15 +63,13 @@ export function importSalami() {
 
 /**
  * @param {string} datasetId
- * @param {{ page?: number, pageSize?: number, hasGroundTruth?: boolean | null }} [options]
+ * @param {{ hasGroundTruth?: boolean | null }} [options]
  */
-export function listDatasetTracks(datasetId, { page = 1, pageSize = 50, hasGroundTruth = null } = {}) {
-  const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(pageSize),
-  });
+export function listDatasetTracks(datasetId, { hasGroundTruth = null } = {}) {
+  const params = new URLSearchParams();
   if (hasGroundTruth !== null) params.set("has_ground_truth", String(hasGroundTruth));
-  return apiFetch(`/datasets/${datasetId}/tracks?${params}`);
+  const qs = params.toString();
+  return apiFetch(`/datasets/${datasetId}/tracks${qs ? `?${qs}` : ""}`);
 }
 
 /**

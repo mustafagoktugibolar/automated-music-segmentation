@@ -19,8 +19,6 @@
   let selectedDataset = null;
   let tracks = [];
   let tracksTotal = 0;
-  let page = 1;
-  const PAGE_SIZE = 476;
 
   let filterGT = false;
   let isImporting = false;
@@ -158,7 +156,6 @@
   async function selectDataset(ds) {
     selectedDataset = ds;
     selectedTrack = null;
-    page = 1;
     await loadTracks();
   }
 
@@ -166,8 +163,6 @@
     if (!selectedDataset) return;
     try {
       const res = await listDatasetTracks(selectedDataset.dataset_id, {
-        page,
-        pageSize: PAGE_SIZE,
         hasGroundTruth: filterGT ? true : null,
       });
       tracks = res.tracks || [];
@@ -267,12 +262,6 @@
     }
   }
 
-  function changePage(delta) {
-    page = Math.max(1, page + delta);
-    loadTracks();
-  }
-
-  const totalPages = () => Math.ceil(tracksTotal / PAGE_SIZE);
 </script>
 
 <div class="flex h-[calc(100vh-49px)] overflow-hidden text-zinc-100">
@@ -420,23 +409,9 @@
             </table>
           </div>
 
-          <!-- Pagination -->
-          <div class="flex items-center justify-between border-t border-zinc-800 bg-zinc-900/50 px-4 py-2">
-            <span class="text-xs text-zinc-400">
-              {tracksTotal} total · page {page} / {totalPages() || 1}
-            </span>
-            <div class="flex gap-2">
-              <button
-                class="rounded-lg border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-                on:click={() => changePage(-1)}
-                disabled={page <= 1}
-              >← Prev</button>
-              <button
-                class="rounded-lg border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-                on:click={() => changePage(1)}
-                disabled={page >= totalPages()}
-              >Next →</button>
-            </div>
+          <!-- Track count -->
+          <div class="border-t border-zinc-800 bg-zinc-900/50 px-4 py-2">
+            <span class="text-xs text-zinc-400">{tracksTotal} total</span>
           </div>
         </div>
 
@@ -676,7 +651,7 @@
               class="rounded-xl bg-indigo-500/20 border border-indigo-500/30 px-3 py-1.5 text-sm font-medium text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50"
               on:click={async () => { await segmentAll(); }}
               disabled={isSegmenting || tracks.length === 0}
-            >{isSegmenting ? 'Segmenting…' : 'Segment All (page)'}</button>
+            >{isSegmenting ? 'Segmenting…' : 'Segment All'}</button>
           </div>
           {#if segmentMessage}
             <p class="text-xs text-emerald-400">{segmentMessage}</p>
