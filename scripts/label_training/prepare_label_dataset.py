@@ -73,7 +73,12 @@ def _get_audio_bytes(song_id: str) -> bytes | None:
 # ── SALAMI loader ─────────────────────────────────────────────────────────────
 
 def _load_salami_entries(annotators: list[int], max_songs: int) -> list[dict]:
-    """Return [{song_id, dataset, segments}, ...] for SALAMI songs that have audio."""
+    """Return [{song_id, raw_track_id, annotator_id, dataset, segments}, ...].
+
+    raw_track_id is annotator-independent (salami_{raw_id}); used for grouped
+    splitting so the same audio track never appears in two different splits
+    even when multiple annotators are present.
+    """
     from backend.services.salami_parser import parse_salami_annotation
 
     if not os.path.isdir(ANNOTATIONS_DIR):
@@ -101,15 +106,17 @@ def _load_salami_entries(annotators: list[int], max_songs: int) -> list[dict]:
         ann_ids = ann_ids[:max_songs]
 
     entries: list[dict] = []
-    for song_id in ann_ids:
+    for raw_id in ann_ids:
         for ann in annotators:
-            segs = parse_salami_annotation(song_id, annotator=ann)
+            segs = parse_salami_annotation(raw_id, annotator=ann)
             if segs:
                 entries.append({
-                    "song_id":  f"salami_{song_id}_ann{ann}",
-                    "raw_id":   song_id,
-                    "dataset":  "salami",
-                    "segments": segs,
+                    "song_id":      f"salami_{raw_id}_ann{ann}",
+                    "raw_id":       raw_id,
+                    "raw_track_id": f"salami_{raw_id}",
+                    "annotator_id": ann,
+                    "dataset":      "salami",
+                    "segments":     segs,
                 })
                 break  # use the first available annotator
 
@@ -121,10 +128,12 @@ def _load_salami_entries(annotators: list[int], max_songs: int) -> list[dict]:
 
 def _extract_rows(entry: dict) -> list[dict] | None:
     """Build one row per segment; return None when audio is unavailable."""
-    song_id  = entry["song_id"]
-    raw_id   = entry["raw_id"]
-    segments = entry["segments"]
-    dataset  = entry["dataset"]
+    song_id       = entry["song_id"]
+    raw_id        = entry["raw_id"]
+    raw_track_id  = entry["raw_track_id"]
+    annotator_id  = entry["annotator_id"]
+    segments      = entry["segments"]
+    dataset       = entry["dataset"]
 
     audio_bytes = _get_audio_bytes(raw_id)
     if audio_bytes is None:
@@ -148,12 +157,14 @@ def _extract_rows(entry: dict) -> list[dict] | None:
             canonical = "Other"
 
         row: dict = {
-            "song_id":     song_id,
-            "dataset":     dataset,
-            "segment_idx": idx,
-            "start":       round(float(seg.get("start", 0.0)), 3),
-            "end":         round(float(seg.get("end",   0.0)), 3),
-            "label":       canonical,
+            "song_id":      song_id,
+            "raw_track_id": raw_track_id,
+            "annotator_id": annotator_id,
+            "dataset":      dataset,
+            "segment_idx":  idx,
+            "start":        round(float(seg.get("start", 0.0)), 3),
+            "end":          round(float(seg.get("end",   0.0)), 3),
+            "label":        canonical,
         }
         for fname, fval in zip(feat_names, feat_vec.tolist()):
             row[fname] = fval

@@ -62,7 +62,10 @@ _MERGE_MAPS: dict[str, dict[str, str]] = {
 }
 
 DEFAULT_SEEDS    = [42, 123, 2024, 7, 99]
-META_COLS        = {"song_id", "dataset", "segment_idx", "start", "end", "label"}
+META_COLS        = {
+    "song_id", "raw_track_id", "annotator_id",
+    "dataset", "segment_idx", "start", "end", "label",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -127,19 +130,20 @@ def make_grouped_split(
 
 
 def check_split_integrity(
-    train_ids: set, val_ids: set, test_ids: set
+    train_ids: set, val_ids: set, test_ids: set,
+    label: str = "group",
 ) -> None:
-    """Raise if any song appears in more than one split."""
+    """Raise if any id appears in more than one split."""
     tv = train_ids & val_ids
     tt = train_ids & test_ids
     vt = val_ids & test_ids
     if tv or tt or vt:
-        msg = "SPLIT LEAKAGE DETECTED:\n"
+        msg = f"SPLIT LEAKAGE DETECTED ({label}):\n"
         if tv: msg += f"  train ∩ val  = {tv}\n"
         if tt: msg += f"  train ∩ test = {tt}\n"
         if vt: msg += f"  val   ∩ test = {vt}\n"
         raise RuntimeError(msg)
-    print("  Split integrity: OK (no song appears in more than one split)")
+    print(f"  Split integrity ({label}): OK")
 
 
 def print_split_diagnostics(
@@ -191,13 +195,13 @@ def print_split_diagnostics(
 # Feature building
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def build_features(df: "pd.DataFrame"):
+def build_features(df: "pd.DataFrame", group_col: str = "song_id"):
     """Return (X, y, groups, label_encoder, feature_cols)."""
     from sklearn.preprocessing import LabelEncoder
 
     feature_cols = [c for c in df.columns if c not in META_COLS]
     X      = df[feature_cols].values.astype(np.float32)
-    groups = df["song_id"].values
+    groups = df[group_col].values
 
     le = LabelEncoder()
     y  = le.fit_transform(df["label"].values)
@@ -390,6 +394,12 @@ def save_evaluation_artifacts(
     with open(MODEL_META, "w") as f:
         json.dump(meta, f, indent=2)
 
+    # Mode-specific copy so multiple merge modes don't overwrite each other.
+    merge_mode = meta.get("merge_mode", "unknown")
+    mode_meta_path = os.path.join(EVAL_DIR, f"meta_{merge_mode}.json")
+    with open(mode_meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
     print(f"\nArtifacts saved → {EVAL_DIR}/")
 
 
@@ -421,9 +431,9 @@ def run_single_seed(
     check_split_integrity(train_songs, val_songs, test_songs)
 
     if verbose:
-        print(f"\n  Train: {len(X[train_idx])} segs / {len(train_songs)} songs")
-        print(f"  Val:   {len(X[val_idx])} segs / {len(val_songs)} songs")
-        print(f"  Test:  {len(X[test_idx])} segs / {len(test_songs)} songs")
+        print(f"\n  Train: {len(X[train_idx])} segs / {len(train_songs)} groups")
+        print(f"  Val:   {len(X[val_idx])} segs / {len(val_songs)} groups")
+        print(f"  Test:  {len(X[test_idx])} segs / {len(test_songs)} groups")
 
     X_train, y_train = X[train_idx], y[train_idx]
     X_val,   y_val   = X[val_idx],   y[val_idx]
@@ -522,7 +532,19 @@ def main() -> None:
 
     print(f"\nLabel distribution:\n{df['label'].value_counts().to_string()}")
 
-    X, y, groups, le, feature_cols = build_features(df)
+    # ── Choose grouping column ────────────────────────────────────────────────
+    if "raw_track_id" in df.columns:
+        group_col = "raw_track_id"
+        print(
+            f"\nGrouping split by raw_track_id  "
+            f"({df['raw_track_id'].nunique()} unique tracks, "
+            f"{df['song_id'].nunique()} unique song_ids)"
+        )
+    else:
+        group_col = "song_id"
+        print(f"\nGrouping split by song_id  ({df['song_id'].nunique()} unique songs)")
+
+    X, y, groups, le, feature_cols = build_features(df, group_col=group_col)
 
     # ── Multi-seed ────────────────────────────────────────────────────────────
     seed_rows: list[dict] = []
@@ -543,12 +565,24 @@ def main() -> None:
         random_state=primary_seed,
     )
 
-    train_songs = set(groups[train_idx])
-    val_songs   = set(groups[val_idx])
-    test_songs  = set(groups[test_idx])
+    train_groups = set(groups[train_idx])
+    val_groups   = set(groups[val_idx])
+    test_groups  = set(groups[test_idx])
+
+    # Backwards-compat aliases used in diagnostics
+    train_songs = train_groups
+    val_songs   = val_groups
+    test_songs  = test_groups
 
     print("\nSplit integrity check:")
-    check_split_integrity(train_songs, val_songs, test_songs)
+    check_split_integrity(train_groups, val_groups, test_groups, label=group_col)
+    if group_col == "raw_track_id" and "song_id" in df.columns:
+        check_split_integrity(
+            set(df.iloc[train_idx]["song_id"]),
+            set(df.iloc[val_idx]["song_id"]),
+            set(df.iloc[test_idx]["song_id"]),
+            label="song_id",
+        )
 
     print("\nSplit diagnostics:")
     split_diag = print_split_diagnostics(df, train_idx, val_idx, test_idx)
