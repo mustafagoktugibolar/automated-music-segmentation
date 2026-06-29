@@ -1,0 +1,5 @@
+experiment_name,merge_mode,feature_set,regularization_preset,backend,val_macro_f1_mean,val_macro_f1_std,test_macro_f1_mean,test_macro_f1_std,val_test_gap_mean,train_macro_f1_primary,val_macro_f1_primary,test_macro_f1_primary,train_test_gap_primary
+other_full,other,full,,lightgbm,0.72224,0.011244838816096926,0.7193799999999999,0.007946168888212743,0.0029,0.9782,0.7328,0.7202,0.258
+other_no_context_seed42,other,no_context,,lightgbm,,,,,,0.9817,0.7059,0.695,0.2867
+other_acoustic_context_seed42,other,acoustic_context,,lightgbm,,,,,,0.9534,0.6889,0.677,0.2764
+smoke,other,acoustic,balanced,lightgbm,,,,,,0.7758,0.5244,0.5284,0.2474

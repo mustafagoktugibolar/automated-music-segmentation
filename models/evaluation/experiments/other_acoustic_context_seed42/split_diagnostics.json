@@ -6,23 +6,19 @@
     "label_counts": {
       "Chorus": 2486,
       "Verse": 1998,
+      "Other": 1855,
       "Instrumental": 1085,
-      "Other": 822,
       "Intro": 740,
       "Silence": 584,
-      "Bridge": 562,
-      "Pre-Chorus": 471,
       "Outro": 410
     },
     "label_pct": {
       "Chorus": 27.1,
       "Verse": 21.8,
+      "Other": 20.3,
       "Instrumental": 11.8,
-      "Other": 9.0,
       "Intro": 8.1,
       "Silence": 6.4,
-      "Bridge": 6.1,
-      "Pre-Chorus": 5.1,
       "Outro": 4.5
     },
     "dataset_distribution": {
@@ -42,23 +38,19 @@
     "label_counts": {
       "Chorus": 834,
       "Verse": 622,
+      "Other": 608,
       "Instrumental": 295,
       "Intro": 256,
-      "Other": 251,
-      "Bridge": 194,
       "Silence": 180,
-      "Pre-Chorus": 163,
       "Outro": 149
     },
     "label_pct": {
       "Chorus": 28.3,
       "Verse": 21.1,
+      "Other": 20.7,
       "Instrumental": 10.0,
       "Intro": 8.7,
-      "Other": 8.5,
-      "Bridge": 6.6,
       "Silence": 6.1,
-      "Pre-Chorus": 5.5,
       "Outro": 5.1
     },
     "dataset_distribution": {
@@ -77,24 +69,20 @@
     "avg_segs_per_song": 11.1,
     "label_counts": {
       "Chorus": 833,
+      "Other": 652,
       "Verse": 626,
       "Instrumental": 312,
-      "Other": 278,
       "Intro": 246,
-      "Pre-Chorus": 200,
       "Silence": 181,
-      "Bridge": 174,
       "Outro": 137
     },
     "label_pct": {
       "Chorus": 27.9,
+      "Other": 21.8,
       "Verse": 21.0,
       "Instrumental": 10.4,
-      "Other": 9.3,
       "Intro": 8.2,
-      "Pre-Chorus": 6.7,
       "Silence": 6.1,
-      "Bridge": 5.8,
       "Outro": 4.6
     },
     "dataset_distribution": {

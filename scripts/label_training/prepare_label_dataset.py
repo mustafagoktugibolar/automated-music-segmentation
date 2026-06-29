@@ -176,6 +176,7 @@ def _extract_rows(entry: dict) -> list[dict] | None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="Build segment-label training dataset.")
     parser.add_argument("--max-songs",  type=int, default=0,
                         help="Max SALAMI songs to process (0 = all).")
@@ -191,7 +192,7 @@ def main() -> None:
         print("No songs found. Check annotations dir and MinIO/audio_cache.")
         sys.exit(1)
 
-    print(f"\nExtracting features for {len(entries)} songs  (workers={args.workers}) …")
+    print(f"\nExtracting features for {len(entries)} songs  (workers={args.workers}) …", flush=True)
     all_rows: list[dict] = []
     t0 = time.perf_counter()
 
@@ -213,7 +214,8 @@ def main() -> None:
                 print(
                     f"  {done}/{len(entries)}  "
                     f"segments: {len(all_rows)}  "
-                    f"elapsed: {time.perf_counter() - t0:.1f}s"
+                    f"elapsed: {time.perf_counter() - t0:.1f}s",
+                    flush=True,
                 )
 
     if not all_rows:

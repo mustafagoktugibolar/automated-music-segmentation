@@ -400,6 +400,7 @@ def _process_song(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(
         description="Build Harmonix mel-spec → segment-label parquet."
     )
@@ -446,35 +447,44 @@ def main() -> None:
     _ensure_annotations(song_names, workers=args.dl_workers)
 
     # ── Process songs ─────────────────────────────────────────────────────────
-    print(f"\nExtracting features  (workers={args.workers}) …")
+    print(f"\nExtracting features  (workers={args.workers}) …", flush=True)
     all_rows: list[dict] = []
     skipped  = 0
     t0       = time.perf_counter()
 
-    for i, name in enumerate(song_names):
-        m   = member_map[name]
-        buf = tf.extractfile(m)
-        if buf is None:
-            skipped += 1
-            continue
-        mel = np.load(io.BytesIO(buf.read()), allow_pickle=False)  # (80, T)
+    # Pipeline: submit to pool as each mel is extracted; avoids loading all into RAM at once.
+    pending: dict = {}
+    total = len(song_names)
 
-        rows = _process_song(name, mel)
-        if rows:
-            all_rows.extend(rows)
-        else:
-            skipped += 1
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        for name in song_names:
+            m   = member_map[name]
+            buf = tf.extractfile(m)
+            if buf is None:
+                skipped += 1
+                continue
+            mel = np.load(io.BytesIO(buf.read()), allow_pickle=False)
+            pending[pool.submit(_process_song, name, mel)] = name
 
-        if (i + 1) % 50 == 0 or (i + 1) == len(song_names):
-            elapsed = time.perf_counter() - t0
-            print(
-                f"  {i+1}/{len(song_names)}  "
-                f"segments: {len(all_rows)}  "
-                f"skipped: {skipped}  "
-                f"elapsed: {elapsed:.1f}s"
-            )
+        tf.close()
 
-    tf.close()
+        done = 0
+        for fut in as_completed(pending):
+            rows = fut.result()
+            done += 1
+            if rows:
+                all_rows.extend(rows)
+            else:
+                skipped += 1
+            if done % 50 == 0 or done == len(pending):
+                elapsed = time.perf_counter() - t0
+                print(
+                    f"  {done}/{total}  "
+                    f"segments: {len(all_rows)}  "
+                    f"skipped: {skipped}  "
+                    f"elapsed: {elapsed:.1f}s",
+                    flush=True,
+                )
 
     if not all_rows:
         print("No rows produced. Check annotation downloads and tar path.")
