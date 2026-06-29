@@ -145,26 +145,48 @@ def predict_semantic_labels(
         clf = bundle["clf"]
         le  = bundle["label_encoder"]
 
-        X, _ = build_segment_label_vectors(
+        X_full, full_feature_names = build_segment_label_vectors(
             segments,
             descriptors=descriptors,
             file_path=file_path,
         )
 
-        model_features = bundle.get("feature_names", [])
-        if model_features and X.shape[1] != len(model_features):
+        if X_full.shape[0] == 0:
+            return list(segments)
+
+        model_features = list(bundle.get("feature_names") or [])
+        if model_features:
+            name_to_idx = {name: i for i, name in enumerate(full_feature_names)}
+            missing = [name for name in model_features if name not in name_to_idx]
+            if missing:
+                logger.warning(
+                    "Model expects unknown feature columns %s; falling back to heuristic.",
+                    missing[:5],
+                )
+                return _heuristic_fallback()
+            indices = [name_to_idx[name] for name in model_features]
+            X_model = X_full[:, indices]
+        else:
+            X_model = X_full
+            model_features = list(full_feature_names)
+
+        expected = getattr(clf, "n_features_in_", None)
+        if expected is not None and X_model.shape[1] != expected:
             logger.warning(
                 "Feature count mismatch: model expects %d features but got %d. "
                 "Re-run prepare_label_dataset.py and retrain. Falling back to heuristic.",
-                len(model_features), X.shape[1],
+                expected, X_model.shape[1],
             )
             return _heuristic_fallback()
 
-        if X.shape[0] == 0:
-            return list(segments)
+        try:
+            import pandas as pd
+            X_input = pd.DataFrame(X_model, columns=model_features)
+        except Exception:
+            X_input = X_model
 
-        preds = clf.predict(X)
-        proba = clf.predict_proba(X)  # shape (N, n_classes)
+        preds = clf.predict(X_input)
+        proba = clf.predict_proba(X_input)  # shape (N, n_classes)
 
         out = [dict(s) for s in segments]
         for i, seg in enumerate(out):

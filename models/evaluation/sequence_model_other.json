@@ -1,0 +1,46 @@
+{
+  "merge_mode": "other",
+  "classes": [
+    "Chorus",
+    "Instrumental",
+    "Intro",
+    "Other",
+    "Outro",
+    "Silence",
+    "Verse"
+  ],
+  "n_features": 87,
+  "seeds": [
+    42
+  ],
+  "val_macro_f1_mean": 0.7364055656122205,
+  "val_macro_f1_std": 0.0,
+  "test_macro_f1_mean": 0.7545005632665941,
+  "test_macro_f1_std": 0.0,
+  "val_test_gap": -0.018094997654373612,
+  "per_seed": [
+    {
+      "seed": 42,
+      "val_macro_f1": 0.7364055656122205,
+      "test_macro_f1": 0.7545005632665941,
+      "per_class_f1": {
+        "Chorus": 0.7197568389057751,
+        "Instrumental": 0.6486486486486487,
+        "Intro": 0.8812877263581489,
+        "Other": 0.6334693877551021,
+        "Outro": 0.6870748299319728,
+        "Silence": 0.9777777777777777,
+        "Verse": 0.7334887334887334
+      }
+    }
+  ],
+  "best_seed_per_class_f1": {
+    "Chorus": 0.7197568389057751,
+    "Instrumental": 0.6486486486486487,
+    "Intro": 0.8812877263581489,
+    "Other": 0.6334693877551021,
+    "Outro": 0.6870748299319728,
+    "Silence": 0.9777777777777777,
+    "Verse": 0.7334887334887334
+  }
+}

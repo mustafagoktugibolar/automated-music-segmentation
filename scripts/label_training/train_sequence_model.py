@@ -455,6 +455,7 @@ def run_seed(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="BiLSTM-CRF segment-label sequence model.")
     parser.add_argument("--input",        default=PARQUET_PATH)
     parser.add_argument("--extra-parquet", nargs="*", default=[])

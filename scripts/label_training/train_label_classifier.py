@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -48,6 +49,8 @@ import numpy as np
 PARQUET_PATH = os.path.join(_app_root, "data", "label_training", "segments.parquet")
 MODELS_DIR   = os.path.join(_app_root, "models")
 EVAL_DIR     = os.path.join(MODELS_DIR, "evaluation")
+EXPERIMENT_MODELS_DIR = os.path.join(MODELS_DIR, "experiments")
+EXPERIMENT_EVAL_DIR   = os.path.join(EVAL_DIR, "experiments")
 MODEL_JOBLIB = os.path.join(MODELS_DIR, "segment_label_clf.joblib")
 MODEL_META   = os.path.join(MODELS_DIR, "segment_label_clf.meta.json")
 
@@ -66,6 +69,47 @@ META_COLS        = {
     "song_id", "raw_track_id", "annotator_id",
     "dataset", "segment_idx", "start", "end", "label",
 }
+FEATURE_SETS = {"full", "acoustic", "acoustic_context", "no_context", "no_repetition"}
+REGULARIZATION_PRESETS: dict[str, dict[str, float | int]] = {
+    "default": {
+        "learning_rate": 0.05,
+        "num_leaves": 63,
+        "min_child_samples": 20,
+        "reg_lambda": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+    },
+    "balanced": {
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "max_depth": 6,
+        "min_child_samples": 60,
+        "reg_alpha": 0.2,
+        "reg_lambda": 2.0,
+        "min_gain_to_split": 0.01,
+        "subsample": 0.75,
+        "colsample_bytree": 0.70,
+    },
+    "strong": {
+        "learning_rate": 0.03,
+        "num_leaves": 15,
+        "max_depth": 4,
+        "min_child_samples": 80,
+        "reg_alpha": 0.5,
+        "reg_lambda": 5.0,
+        "min_gain_to_split": 0.02,
+        "subsample": 0.70,
+        "colsample_bytree": 0.65,
+    },
+}
+
+
+def _sanitize_experiment_name(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", name.strip())
+    cleaned = cleaned.strip("._-")
+    if not cleaned:
+        raise ValueError("--experiment-name must contain at least one letter or number")
+    return cleaned
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -221,9 +265,73 @@ def build_features(df: "pd.DataFrame", group_col: str = "song_id"):
     return X, y, groups, le, feature_cols
 
 
+def select_feature_columns(feature_cols: list[str], feature_set: str) -> list[str]:
+    """Return feature columns for a named ablation set.
+
+    Layout is defined by workers.core.labeling.features:
+    60 acoustic + 11 context + 8 repetition + 8 contrast = 87.
+    """
+    if feature_set not in FEATURE_SETS:
+        raise ValueError(f"Unknown feature set: {feature_set}")
+    if len(feature_cols) < 87:
+        raise ValueError(
+            f"Expected at least 87 feature columns for ablation, got {len(feature_cols)}"
+        )
+    acoustic = feature_cols[:60]
+    context = feature_cols[60:71]
+    repetition = feature_cols[71:79]
+    contrast = feature_cols[79:87]
+    if feature_set == "full":
+        return feature_cols
+    if feature_set == "acoustic":
+        return acoustic
+    if feature_set == "acoustic_context":
+        return acoustic + context
+    if feature_set == "no_context":
+        return acoustic + repetition + contrast
+    if feature_set == "no_repetition":
+        return acoustic + context + contrast
+    raise AssertionError(f"Unhandled feature set: {feature_set}")
+
+
+def build_features_for_set(
+    df: "pd.DataFrame", group_col: str = "song_id", feature_set: str = "full"
+):
+    """Return model inputs after applying a named feature ablation."""
+    X_full, y, groups, le, feature_cols = build_features(df, group_col=group_col)
+    selected_cols = select_feature_columns(feature_cols, feature_set)
+    if len(selected_cols) == len(feature_cols):
+        print(f"Feature set: {feature_set}  |  Selected features: {X_full.shape[1]}")
+        return X_full, y, groups, le, selected_cols
+    X = df[selected_cols].values.astype(np.float32)
+    print(f"Feature set: {feature_set}  |  Selected features: {X.shape[1]}")
+    return X, y, groups, le, selected_cols
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Training
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _feature_frame(X: np.ndarray, feature_cols: list[str] | None):
+    """Return a named DataFrame for sklearn estimators when feature names exist."""
+    if not feature_cols:
+        return X
+    import pandas as pd
+    return pd.DataFrame(X, columns=feature_cols)
+
+
+def lightgbm_params(regularization_preset: str) -> dict[str, Any]:
+    if regularization_preset not in REGULARIZATION_PRESETS:
+        raise ValueError(f"Unknown regularization preset: {regularization_preset}")
+    params: dict[str, Any] = {
+        "n_estimators": 2000,
+        "random_state": 42,
+        "n_jobs": -1,
+        "verbose": -1,
+    }
+    params.update(REGULARIZATION_PRESETS[regularization_preset])
+    return params
+
 
 def _sample_weights(y: np.ndarray) -> np.ndarray:
     from sklearn.utils.class_weight import compute_sample_weight
@@ -234,6 +342,8 @@ def train_model(
     X_train: np.ndarray, y_train: np.ndarray,
     X_val:   np.ndarray, y_val:   np.ndarray,
     backend: str,
+    feature_cols: list[str] | None = None,
+    regularization_preset: str = "default",
 ):
     """Train GBDT with grouped early stopping on the external validation set.
 
@@ -242,20 +352,19 @@ def train_model(
     """
     sw_train = _sample_weights(y_train)
     sw_val   = _sample_weights(y_val)
+    X_train_fit = _feature_frame(X_train, feature_cols)
+    X_val_fit = _feature_frame(X_val, feature_cols)
 
     if backend == "lightgbm":
         try:
             import lightgbm as lgb
-            clf = lgb.LGBMClassifier(
-                n_estimators=2000, learning_rate=0.05,
-                num_leaves=63, min_child_samples=20,
-                reg_lambda=0.1, subsample=0.8, colsample_bytree=0.8,
-                random_state=42, n_jobs=-1, verbose=-1,
-            )
+            params = lightgbm_params(regularization_preset)
+            clf = lgb.LGBMClassifier(**params)
             print("  External validation set used as LightGBM eval_set (not in training rows).")
+            print(f"  Regularization preset: {regularization_preset}")
             clf.fit(
-                X_train, y_train, sample_weight=sw_train,
-                eval_set=[(X_val, y_val)],
+                X_train_fit, y_train, sample_weight=sw_train,
+                eval_set=[(X_val_fit, y_val)],
                 eval_sample_weight=[sw_val],
                 callbacks=[lgb.early_stopping(stopping_rounds=30, verbose=False),
                            lgb.log_evaluation(period=-1)],
@@ -291,7 +400,7 @@ def train_model(
         early_stopping=True, validation_fraction=0.1,
         n_iter_no_change=30, random_state=42,
     )
-    clf.fit(X_train, y_train, sample_weight=sw_train)
+    clf.fit(X_train_fit, y_train, sample_weight=sw_train)
     print(f"  Early stopping at iteration {clf.n_iter_}.")
     return clf
 
@@ -307,12 +416,14 @@ def evaluate_model(
     y: np.ndarray,
     split_name: str,
     n_songs: int,
+    feature_cols: list[str] | None = None,
 ) -> dict:
     from sklearn.metrics import (
         accuracy_score, classification_report, confusion_matrix, f1_score
     )
 
-    y_pred = clf.predict(X)
+    X_eval = _feature_frame(X, feature_cols)
+    y_pred = clf.predict(X_eval)
     acc    = float(accuracy_score(y, y_pred))
     macro  = float(f1_score(y, y_pred, average="macro",    zero_division=0))
     weighted = float(f1_score(y, y_pred, average="weighted", zero_division=0))
@@ -365,26 +476,29 @@ def save_evaluation_artifacts(
     split_diag:    dict,
     seed_rows:     list[dict],
     meta:          dict,
+    eval_dir:      str = EVAL_DIR,
+    meta_path:     str = MODEL_META,
+    write_mode_meta: bool = True,
 ) -> None:
     import pandas as pd
 
-    os.makedirs(EVAL_DIR, exist_ok=True)
+    os.makedirs(eval_dir, exist_ok=True)
 
     # ── Classification reports ────────────────────────────────────────────────
     for name, res in [("train", train_result), ("val", val_result), ("test", test_result)]:
-        path = os.path.join(EVAL_DIR, f"classification_report_{name}.json")
+        path = os.path.join(eval_dir, f"classification_report_{name}.json")
         with open(path, "w") as f:
             json.dump(res["report"], f, indent=2)
 
     # ── Confusion matrices ────────────────────────────────────────────────────
     for name, res in [("val", val_result), ("test", test_result)]:
         cm_df = pd.DataFrame(res["confusion_matrix"], index=classes, columns=classes)
-        cm_df.to_csv(os.path.join(EVAL_DIR, f"confusion_matrix_{name}.csv"))
+        cm_df.to_csv(os.path.join(eval_dir, f"confusion_matrix_{name}.csv"))
 
     # ── Top misclassifications ────────────────────────────────────────────────
     mc = top_misclassifications(test_result["confusion_matrix"], classes)
     pd.DataFrame(mc).to_csv(
-        os.path.join(EVAL_DIR, "misclassifications_test.csv"), index=False
+        os.path.join(eval_dir, "misclassifications_test.csv"), index=False
     )
     print("\nTop misclassifications (test):")
     for row in mc[:10]:
@@ -393,25 +507,26 @@ def save_evaluation_artifacts(
     # ── Metrics by seed ───────────────────────────────────────────────────────
     if seed_rows:
         pd.DataFrame(seed_rows).to_csv(
-            os.path.join(EVAL_DIR, "metrics_by_seed.csv"), index=False
+            os.path.join(eval_dir, "metrics_by_seed.csv"), index=False
         )
 
     # ── Split diagnostics ─────────────────────────────────────────────────────
-    with open(os.path.join(EVAL_DIR, "split_diagnostics.json"), "w") as f:
+    with open(os.path.join(eval_dir, "split_diagnostics.json"), "w") as f:
         json.dump(split_diag, f, indent=2)
 
-    # ── Model meta ────────────────────────────────────────────────────────────
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    with open(MODEL_META, "w") as f:
+    # Model meta
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+    with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
     # Mode-specific copy so multiple merge modes don't overwrite each other.
-    merge_mode = meta.get("merge_mode", "unknown")
-    mode_meta_path = os.path.join(EVAL_DIR, f"meta_{merge_mode}.json")
-    with open(mode_meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
+    if write_mode_meta:
+        merge_mode = meta.get("merge_mode", "unknown")
+        mode_meta_path = os.path.join(eval_dir, f"meta_{merge_mode}.json")
+        with open(mode_meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
 
-    print(f"\nArtifacts saved → {EVAL_DIR}/")
+    print(f"\nArtifacts saved -> {eval_dir}/")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -424,6 +539,7 @@ def run_single_seed(
     df: "pd.DataFrame",
     val_size: float, test_size: float,
     backend: str, seed: int,
+    regularization_preset: str = "default",
     verbose: bool = True,
 ) -> dict:
     if verbose:
@@ -451,13 +567,13 @@ def run_single_seed(
     X_test,  y_test  = X[test_idx],  y[test_idx]
 
     t0 = time.perf_counter()
-    clf = train_model(X_train, y_train, X_val, y_val, backend)
+    clf = train_model(X_train, y_train, X_val, y_val, backend, feature_cols, regularization_preset)
     if verbose:
         print(f"  Training done in {time.perf_counter() - t0:.1f}s.")
 
-    train_res = evaluate_model(clf, le, X_train, y_train, "Train",      len(train_songs))
-    val_res   = evaluate_model(clf, le, X_val,   y_val,   "Validation", len(val_songs))
-    test_res  = evaluate_model(clf, le, X_test,  y_test,  "Test",       len(test_songs))
+    train_res = evaluate_model(clf, le, X_train, y_train, "Train",      len(train_songs), feature_cols)
+    val_res   = evaluate_model(clf, le, X_val,   y_val,   "Validation", len(val_songs), feature_cols)
+    test_res  = evaluate_model(clf, le, X_test,  y_test,  "Test",       len(test_songs), feature_cols)
 
     return {
         "seed": seed,
@@ -483,6 +599,7 @@ def run_multi_seed_evaluation(
     seeds: list[int],
     val_size: float, test_size: float,
     backend: str,
+    regularization_preset: str = "default",
 ) -> list[dict]:
     print(f"\n{'#'*60}")
     print(f"  MULTI-SEED EVALUATION  (seeds: {seeds})")
@@ -492,7 +609,7 @@ def run_multi_seed_evaluation(
     for seed in seeds:
         result = run_single_seed(
             X, y, groups, le, feature_cols, df,
-            val_size, test_size, backend, seed, verbose=False
+            val_size, test_size, backend, seed, regularization_preset, verbose=False
         )
         row = {
             "seed":            seed,
@@ -524,6 +641,7 @@ def run_multi_seed_evaluation(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="Train segment-label GBDT classifier.")
     parser.add_argument("--input",        default=PARQUET_PATH)
     parser.add_argument("--output-model", default=MODEL_JOBLIB)
@@ -531,12 +649,33 @@ def main() -> None:
     parser.add_argument("--test-size",    type=float, default=0.20)
     parser.add_argument("--backend",      default="lightgbm", choices=["lightgbm", "sklearn", "xgboost"])
     parser.add_argument("--merge-mode",   default="none", choices=list(_MERGE_MAPS))
+    parser.add_argument("--feature-set",  default="full", choices=sorted(FEATURE_SETS),
+                        help="Named feature ablation set to train on.")
+    parser.add_argument("--regularization-preset", default="default",
+                        choices=sorted(REGULARIZATION_PRESETS),
+                        help="LightGBM regularization preset.")
+    parser.add_argument("--experiment-name", default="",
+                        help="Write model/artifacts under models/experiments without overwriting production files.")
     parser.add_argument("--seeds",        nargs="+", type=int, default=DEFAULT_SEEDS)
     parser.add_argument("--no-multi-seed", action="store_true",
                         help="Skip multi-seed evaluation; run only seed=args.seeds[0]")
     parser.add_argument("--extra-parquet", nargs="*", default=[],
                         help="Additional parquet files to merge (e.g. harmonix_segments.parquet).")
     args = parser.parse_args()
+
+    experiment_name = _sanitize_experiment_name(args.experiment_name) if args.experiment_name else ""
+    if experiment_name:
+        args.output_model = os.path.join(EXPERIMENT_MODELS_DIR, f"{experiment_name}.joblib")
+        eval_dir = os.path.join(EXPERIMENT_EVAL_DIR, experiment_name)
+        meta_path = os.path.join(eval_dir, "meta.json")
+        write_mode_meta = False
+        print(f"\nExperiment mode: {experiment_name}")
+        print(f"  Model output: {args.output_model}")
+        print(f"  Eval output : {eval_dir}")
+    else:
+        eval_dir = EVAL_DIR
+        meta_path = MODEL_META
+        write_mode_meta = True
 
     # ── Load ──────────────────────────────────────────────────────────────────
     import pandas as pd
@@ -557,7 +696,9 @@ def main() -> None:
         group_col = "song_id"
         print(f"\nGrouping split by song_id  ({df['song_id'].nunique()} unique songs)")
 
-    X, y, groups, le, feature_cols = build_features(df, group_col=group_col)
+    X, y, groups, le, feature_cols = build_features_for_set(
+        df, group_col=group_col, feature_set=args.feature_set
+    )
 
     # ── Multi-seed ────────────────────────────────────────────────────────────
     seed_rows: list[dict] = []
@@ -565,6 +706,7 @@ def main() -> None:
         seed_rows = run_multi_seed_evaluation(
             X, y, groups, le, feature_cols, df,
             args.seeds, args.val_size, args.test_size, args.backend,
+            args.regularization_preset,
         )
 
     # ── Full run with primary seed (diagnostics + artifact saving) ────────────
@@ -606,12 +748,12 @@ def main() -> None:
 
     print(f"\nTraining {args.backend} (early stopping on validation set) …")
     t0 = time.perf_counter()
-    clf = train_model(X_train, y_train, X_val, y_val, args.backend)
+    clf = train_model(X_train, y_train, X_val, y_val, args.backend, feature_cols, args.regularization_preset)
     print(f"Done in {time.perf_counter() - t0:.1f}s.")
 
-    train_res = evaluate_model(clf, le, X_train, y_train, "Train",      len(train_songs))
-    val_res   = evaluate_model(clf, le, X_val,   y_val,   "Validation", len(val_songs))
-    test_res  = evaluate_model(clf, le, X_test,  y_test,  "Test",       len(test_songs))
+    train_res = evaluate_model(clf, le, X_train, y_train, "Train",      len(train_songs), feature_cols)
+    val_res   = evaluate_model(clf, le, X_val,   y_val,   "Validation", len(val_songs), feature_cols)
+    test_res  = evaluate_model(clf, le, X_test,  y_test,  "Test",       len(test_songs), feature_cols)
 
     # ── Save model ────────────────────────────────────────────────────────────
     import joblib
@@ -619,15 +761,20 @@ def main() -> None:
         "clf": clf, "label_encoder": le,
         "feature_names": feature_cols, "classes": list(le.classes_),
         "trained_at": datetime.now(timezone.utc).isoformat(),
+        "feature_set": args.feature_set,
+        "regularization_preset": args.regularization_preset,
+        "model_params": lightgbm_params(args.regularization_preset) if args.backend == "lightgbm" else {},
+        "experiment_name": experiment_name or None,
     }
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(args.output_model), exist_ok=True)
     joblib.dump(bundle, args.output_model)
-    print(f"\nModel saved → {args.output_model}")
+    print(f"\nModel saved -> {args.output_model}")
 
-    # Mode-specific copy so sequence_smooth.py can load the right model per mode.
-    mode_model_path = os.path.join(MODELS_DIR, f"segment_label_clf_{args.merge_mode}.joblib")
-    joblib.dump(bundle, mode_model_path)
-    print(f"Mode-specific model saved → {mode_model_path}")
+    # Mode-specific production copy is intentionally skipped for experiments.
+    if not experiment_name:
+        mode_model_path = os.path.join(MODELS_DIR, f"segment_label_clf_{args.merge_mode}.joblib")
+        joblib.dump(bundle, mode_model_path)
+        print(f"Mode-specific model saved -> {mode_model_path}")
 
     # ── Build meta ────────────────────────────────────────────────────────────
     multi_summary: dict = {}
@@ -648,12 +795,19 @@ def main() -> None:
         "dataset":              args.input,
         "backend":              args.backend,
         "merge_mode":           args.merge_mode,
+        "feature_set":          args.feature_set,
+        "regularization_preset": args.regularization_preset,
+        "model_params":         lightgbm_params(args.regularization_preset) if args.backend == "lightgbm" else {},
+        "experiment_name":      experiment_name or None,
+        "model_path":           args.output_model,
+        "extra_parquets":       args.extra_parquet or [],
         "group_col":            group_col,
         "unique_song_ids":      int(df["song_id"].nunique()),
         "unique_raw_track_ids": int(df["raw_track_id"].nunique()) if "raw_track_id" in df.columns else None,
         "unique_annotator_ids": sorted(df["annotator_id"].unique().tolist()) if "annotator_id" in df.columns else None,
         "classes":              list(le.classes_),
         "feature_count":        len(feature_cols),
+        "feature_names":        feature_cols,
         "primary_seed":         primary_seed,
         "grouped_split":        True,
         "leakage_check_passed": True,
@@ -692,6 +846,9 @@ def main() -> None:
         split_diag   = split_diag,
         seed_rows    = seed_rows,
         meta         = meta,
+        eval_dir     = eval_dir,
+        meta_path    = meta_path,
+        write_mode_meta = write_mode_meta,
     )
 
     # ── Final summary ─────────────────────────────────────────────────────────
@@ -700,12 +857,16 @@ def main() -> None:
     print(f"{'='*60}")
     print(f"  Merge mode  : {args.merge_mode}")
     print(f"  Classes     : {list(le.classes_)}")
+    print(f"  Feature set : {args.feature_set}")
+    print(f"  Reg preset  : {args.regularization_preset}")
     print(f"  Features    : {len(feature_cols)}")
     print(f"  Primary seed: {primary_seed}")
     print(f"\n  {'Split':<10} {'Accuracy':>10} {'Macro-F1':>10} {'Weighted-F1':>12}")
     print(f"  {'-'*44}")
     for name, res in [("Train", train_res), ("Val", val_res), ("Test", test_res)]:
         print(f"  {name:<10} {res['accuracy']:>10.4f} {res['macro_f1']:>10.4f} {res['weighted_f1']:>12.4f}")
+    print(f"  Train-Test Macro-F1 gap: {train_res['macro_f1'] - test_res['macro_f1']:.4f}")
+    print(f"  Groups train/val/test : {len(train_groups)}/{len(val_groups)}/{len(test_groups)}")
 
     if multi_summary:
         print(f"\n  Multi-seed test Macro-F1: "

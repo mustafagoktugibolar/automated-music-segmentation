@@ -43,6 +43,16 @@ if _app_root not in sys.path:
 
 import numpy as np  # noqa: F401 (used by sklearn internals)
 
+from train_label_classifier import (  # noqa: E402
+    DEFAULT_SEEDS,
+    FEATURE_SETS,
+    _MERGE_MAPS,
+    apply_label_merge,
+    build_features_for_set,
+    load_dataset,
+    make_grouped_split,
+)
+
 PARQUET_PATH    = os.path.join(_app_root, "data", "label_training", "segments.parquet")
 ANNOTATIONS_DIR = os.path.join(_app_root, "data", "salami", "annotations")
 AUDIO_CACHE_DIR = os.path.join(_app_root, "data", "audio_cache")
@@ -78,75 +88,87 @@ def _print_report(title: str, y_true: list[str], y_pred: list[str]) -> None:
 
 # ── Mode (a): clean accuracy from parquet ────────────────────────────────────
 
-def eval_clean_parquet(test_size: float) -> None:
-    """Evaluate using held-out rows from the training parquet (fast, no audio).
-
-    Uses bundle["feature_names"] to select columns from parquet directly —
-    no segment dict reconstruction, no build_segment_label_vectors() call.
-    """
+def eval_clean_parquet(
+    val_size: float,
+    test_size: float,
+    seed: int,
+    merge_mode: str,
+    feature_set: str,
+    model_path: str,
+    extra_parquets: list[str] | None = None,
+) -> None:
+    """Evaluate on the same grouped test split used by training."""
     import joblib
     import pandas as pd
-    from sklearn.model_selection import GroupShuffleSplit
     from shared.labeling.heuristic import assign_semantic_labels
 
     if not os.path.exists(PARQUET_PATH):
         print(f"Parquet not found: {PARQUET_PATH}. Run prepare_label_dataset.py first.")
         return
-
-    model_path = os.path.join(_app_root, "models", "segment_label_clf.joblib")
     if not os.path.exists(model_path):
         print(f"Model not found at {model_path}. Run train_label_classifier.py first.")
         return
 
     bundle = joblib.load(model_path)
-    clf            = bundle["clf"]
-    le             = bundle["label_encoder"]
-    model_features = bundle.get("feature_names", [])
+    clf = bundle["clf"]
+    le = bundle["label_encoder"]
+    model_features = list(bundle.get("feature_names") or [])
     if not model_features:
         raise RuntimeError("bundle['feature_names'] is missing or empty.")
 
-    df = pd.read_parquet(PARQUET_PATH)
-    meta_cols = {
-        "song_id", "raw_track_id", "annotator_id",
-        "dataset", "segment_idx", "start", "end", "label",
-    }
+    bundle_merge_mode = bundle.get("merge_mode")
+    if bundle_merge_mode and bundle_merge_mode != merge_mode:
+        raise RuntimeError(
+            f"Model was trained with merge_mode={bundle_merge_mode!r}; "
+            f"eval received merge_mode={merge_mode!r}."
+        )
+
+    bundle_feature_set = bundle.get("feature_set")
+    if bundle_feature_set and bundle_feature_set != feature_set:
+        raise RuntimeError(
+            f"Model was trained with feature_set={bundle_feature_set!r}; "
+            f"eval received feature_set={feature_set!r}."
+        )
+
+    df = load_dataset(PARQUET_PATH, extra_parquets=extra_parquets or [])
+    df = apply_label_merge(df, merge_mode)
+    group_col = "raw_track_id" if "raw_track_id" in df.columns else "song_id"
+    X, _y, groups, le_from_df, feature_cols = build_features_for_set(
+        df, group_col=group_col, feature_set=feature_set
+    )
 
     missing = [f for f in model_features if f not in df.columns]
     if missing:
         raise RuntimeError(
             f"Parquet is missing {len(missing)} feature column(s) expected by the model. "
-            f"Re-run prepare_label_dataset.py to rebuild.\n  Missing: {missing[:10]}"
+            f"Missing: {missing[:10]}"
         )
+    if list(model_features) != list(feature_cols):
+        X = df[model_features].values.astype(np.float32)
+        feature_cols = model_features
 
-    group_col = "raw_track_id" if "raw_track_id" in df.columns else "song_id"
-
-    X      = df[model_features].values.astype(np.float32)
-    labels = df["label"].values
-    groups = df[group_col].values
-
-    if X.shape[1] != len(model_features):
+    if list(le.classes_) != list(le_from_df.classes_):
         raise RuntimeError(
-            f"Feature shape mismatch: parquet gave {X.shape[1]} columns, "
-            f"model expects {len(model_features)}."
+            "Model classes do not match eval labels after merge-mode transform: "
+            f"model={list(le.classes_)} eval={list(le_from_df.classes_)}"
         )
 
-    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
-    _, test_idx = next(gss.split(X, labels, groups=groups))
-
-    df_test  = df.iloc[test_idx]
+    _, _, test_idx = make_grouped_split(
+        groups, val_size=val_size, test_size=test_size, random_state=seed
+    )
+    df_test = df.iloc[test_idx]
     n_groups = df_test[group_col].nunique()
     print(
         f"Clean eval: {len(df_test)} segments from {n_groups} {group_col}s  "
-        f"(group_col={group_col}, features={len(model_features)})."
+        f"(seed={seed}, val_size={val_size}, test_size={test_size}, "
+        f"merge_mode={merge_mode}, feature_set={feature_set}, features={len(feature_cols)})."
     )
 
-    # ML: feed parquet features directly — no fake segment dicts, no re-computation.
-    X_test    = X[test_idx]
-    preds     = le.inverse_transform(clf.predict(X_test))
+    X_test = pd.DataFrame(X[test_idx], columns=feature_cols)
+    preds = le.inverse_transform(clf.predict(X_test))
     y_true_ml = df_test["label"].tolist()
     y_pred_ml = preds.tolist()
 
-    # Heuristic: positional-only (no audio).
     y_pred_heur: list[str] = []
     for _sid, grp in df_test.groupby("song_id"):
         grp = grp.sort_values("segment_idx")
@@ -154,11 +176,8 @@ def eval_clean_parquet(test_size: float) -> None:
         heur_segs = assign_semantic_labels(segments)
         y_pred_heur.extend(s.get("semantic_label", "Unknown") for s in heur_segs)
 
-    _print_report("ML classifier (clean — GT boundaries, parquet split)", y_true_ml, y_pred_ml)
-    _print_report("Heuristic     (clean — GT boundaries, parquet split)", y_true_ml, y_pred_heur)
-
-
-# ── Mode (b): pipeline accuracy (segment + label) ────────────────────────────
+    _print_report("ML classifier (clean - GT boundaries, grouped test split)", y_true_ml, y_pred_ml)
+    _print_report("Heuristic     (clean - GT boundaries, grouped test split)", y_true_ml, y_pred_heur)
 
 def eval_pipeline(max_songs: int, test_size: float) -> None:
     """Run our segmenter on SALAMI audio, label with ML and heuristic, compare."""
@@ -244,20 +263,36 @@ def eval_pipeline(max_songs: int, test_size: float) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="Evaluate segment-label classifier.")
-    parser.add_argument("--mode",        nargs="+", default=["clean"],
+    parser.add_argument("--mode", nargs="+", default=["clean"],
                         choices=["clean", "pipeline"],
                         help="Evaluation mode(s) to run.")
     parser.add_argument("--split-parquet", action="store_true", default=True,
                         help="Use parquet-based split for clean eval (default).")
-    parser.add_argument("--test-size",   type=float, default=0.15,
-                        help="Held-out fraction (same as training script).")
-    parser.add_argument("--max-songs",   type=int, default=20,
-                        help="Max songs for pipeline mode (slow — runs segmenter).")
+    parser.add_argument("--val-size", type=float, default=0.20,
+                        help="Validation fraction used before the grouped test split.")
+    parser.add_argument("--test-size", type=float, default=0.20,
+                        help="Held-out test fraction (same as training script).")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEEDS[0])
+    parser.add_argument("--merge-mode", default="none", choices=list(_MERGE_MAPS))
+    parser.add_argument("--feature-set", default="full", choices=sorted(FEATURE_SETS))
+    parser.add_argument("--model-path", default=os.path.join(_app_root, "models", "segment_label_clf.joblib"))
+    parser.add_argument("--extra-parquet", nargs="*", default=[])
+    parser.add_argument("--max-songs", type=int, default=20,
+                        help="Max songs for pipeline mode (slow - runs segmenter).")
     args = parser.parse_args()
 
     if "clean" in args.mode:
-        eval_clean_parquet(test_size=args.test_size)
+        eval_clean_parquet(
+            val_size=args.val_size,
+            test_size=args.test_size,
+            seed=args.seed,
+            merge_mode=args.merge_mode,
+            feature_set=args.feature_set,
+            model_path=args.model_path,
+            extra_parquets=args.extra_parquet or [],
+        )
     if "pipeline" in args.mode:
         eval_pipeline(max_songs=args.max_songs, test_size=args.test_size)
 

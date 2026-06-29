@@ -1,0 +1,35 @@
+{
+  "without_smoothing": {
+    "accuracy": 0.6826247070639437,
+    "macro_f1": 0.7201772602386567,
+    "per_class": {
+      "Chorus": 0.6599,
+      "Instrumental": 0.6183,
+      "Intro": 0.862,
+      "Other": 0.5808,
+      "Outro": 0.6505,
+      "Silence": 0.9834,
+      "Verse": 0.6863
+    }
+  },
+  "with_smoothing": {
+    "accuracy": 0.6859725477067291,
+    "macro_f1": 0.7224169196025609,
+    "per_class": {
+      "Chorus": 0.6823,
+      "Instrumental": 0.5877,
+      "Intro": 0.878,
+      "Other": 0.5717,
+      "Outro": 0.669,
+      "Silence": 0.9778,
+      "Verse": 0.6905
+    }
+  },
+  "merge_mode": "other",
+  "seed": 42,
+  "model_path": "/app/models/experiments/other_full.joblib",
+  "feature_set": "full",
+  "extra_parquets": [
+    "/app/data/label_training/harmonix_segments.parquet"
+  ]
+}

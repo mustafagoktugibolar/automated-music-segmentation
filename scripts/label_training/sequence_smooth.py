@@ -40,7 +40,7 @@ MODEL_JOBLIB = os.path.join(_app_root, "models", "segment_label_clf.joblib")
 EVAL_DIR     = os.path.join(_app_root, "models", "evaluation")
 
 from train_label_classifier import (  # noqa: E402
-    load_dataset, apply_label_merge, build_features,
+    load_dataset, apply_label_merge, build_features_for_set,
     make_grouped_split, _MERGE_MAPS, DEFAULT_SEEDS, META_COLS,
 )
 
@@ -164,25 +164,45 @@ def evaluate_smoothed(
 
 # ── Single mode run ───────────────────────────────────────────────────────────
 
-def run_mode(merge_mode: str, seed: int, val_size: float, test_size: float) -> dict:
+def run_mode(
+    merge_mode: str,
+    seed: int,
+    val_size: float,
+    test_size: float,
+    extra_parquets: list[str] | None = None,
+    model_path: str | None = None,
+) -> dict:
     import joblib
     import pandas as pd
 
-    df = load_dataset(PARQUET_PATH)
+    chosen_model_path = model_path
+    if chosen_model_path is None:
+        mode_model_path = os.path.join(_app_root, "models", f"segment_label_clf_{merge_mode}.joblib")
+        chosen_model_path = mode_model_path if os.path.exists(mode_model_path) else MODEL_JOBLIB
+    print(f"Loading model: {chosen_model_path}")
+    bundle = joblib.load(chosen_model_path)
+    clf    = bundle["clf"]
+    feature_set = bundle.get("feature_set", "full")
+
+    df = load_dataset(PARQUET_PATH, extra_parquets=extra_parquets or [])
     df = apply_label_merge(df, merge_mode)
 
     group_col = "raw_track_id" if "raw_track_id" in df.columns else "song_id"
-    X, y, groups, le, feature_cols = build_features(df, group_col=group_col)
+    X, y, groups, le, feature_cols = build_features_for_set(
+        df, group_col=group_col, feature_set=feature_set
+    )
+
+    model_features = bundle.get("feature_names") or []
+    if model_features and list(model_features) != list(feature_cols):
+        missing = [c for c in model_features if c not in df.columns]
+        if missing:
+            raise RuntimeError(f"Model feature columns missing from data: {missing[:5]}")
+        feature_cols = list(model_features)
+        X = df[feature_cols].values.astype(np.float32)
 
     train_idx, val_idx, test_idx = make_grouped_split(
         groups, val_size=val_size, test_size=test_size, random_state=seed,
     )
-
-    mode_model_path = os.path.join(_app_root, "models", f"segment_label_clf_{merge_mode}.joblib")
-    model_path = mode_model_path if os.path.exists(mode_model_path) else MODEL_JOBLIB
-    print(f"Loading model: {os.path.basename(model_path)}")
-    bundle = joblib.load(model_path)
-    clf    = bundle["clf"]
 
     # ── Learn transition from training sequences ───────────────────────────────
     df_train    = df.iloc[train_idx].reset_index(drop=True)
@@ -205,9 +225,17 @@ def run_mode(merge_mode: str, seed: int, val_size: float, test_size: float) -> d
     metrics = evaluate_smoothed(clf, le, df, X, y, groups, test_idx, log_trans, feature_cols)
     metrics["merge_mode"] = merge_mode
     metrics["seed"]       = seed
+    metrics["model_path"] = chosen_model_path
+    metrics["feature_set"] = feature_set
+    metrics["extra_parquets"] = extra_parquets or []
 
-    os.makedirs(EVAL_DIR, exist_ok=True)
-    out_path = os.path.join(EVAL_DIR, f"sequence_smooth_{merge_mode}.json")
+    experiment_name = bundle.get("experiment_name")
+    if experiment_name:
+        eval_dir = os.path.join(EVAL_DIR, "experiments", str(experiment_name))
+    else:
+        eval_dir = EVAL_DIR
+    os.makedirs(eval_dir, exist_ok=True)
+    out_path = os.path.join(eval_dir, f"sequence_smooth_{merge_mode}.json")
     with open(out_path, "w") as f:
         json.dump(metrics, f, indent=2)
     print(f"\nSaved → {out_path}")
@@ -215,8 +243,8 @@ def run_mode(merge_mode: str, seed: int, val_size: float, test_size: float) -> d
     # ── Update bundle with transition matrix ───────────────────────────────────
     bundle["transition_matrix"]  = np.exp(log_trans).tolist()
     bundle["transition_classes"] = list(le.classes_)
-    joblib.dump(bundle, model_path)
-    print(f"Bundle updated with transition_matrix → {model_path}")
+    joblib.dump(bundle, chosen_model_path)
+    print(f"Bundle updated with transition_matrix -> {chosen_model_path}")
 
     return metrics
 
@@ -290,6 +318,10 @@ def main() -> None:
     parser.add_argument("--seed",       type=int, default=DEFAULT_SEEDS[0])
     parser.add_argument("--val-size",   type=float, default=0.20)
     parser.add_argument("--test-size",  type=float, default=0.20)
+    parser.add_argument("--extra-parquet", nargs="*", default=[],
+                        help="Additional parquet files to merge for smoothing evaluation.")
+    parser.add_argument("--model-path", default="",
+                        help="Explicit model bundle path, useful for experiments.")
     args = parser.parse_args()
 
     if args.all_modes:
@@ -302,10 +334,17 @@ def main() -> None:
             print(f"\n{'='*60}")
             print(f"  merge_mode = {mode}")
             print(f"{'='*60}")
-            run_mode(mode, args.seed, args.val_size, args.test_size)
+            run_mode(mode, args.seed, args.val_size, args.test_size, args.extra_parquet or [], None)
         build_comparison_csv()
     else:
-        run_mode(args.merge_mode, args.seed, args.val_size, args.test_size)
+        run_mode(
+            args.merge_mode,
+            args.seed,
+            args.val_size,
+            args.test_size,
+            args.extra_parquet or [],
+            args.model_path or None,
+        )
 
 
 if __name__ == "__main__":

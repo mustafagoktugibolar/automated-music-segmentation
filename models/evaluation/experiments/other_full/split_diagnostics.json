@@ -1,0 +1,98 @@
+{
+  "train": {
+    "n_songs": 808,
+    "n_segments": 9158,
+    "avg_segs_per_song": 11.3,
+    "label_counts": {
+      "Chorus": 2486,
+      "Verse": 1998,
+      "Other": 1855,
+      "Instrumental": 1085,
+      "Intro": 740,
+      "Silence": 584,
+      "Outro": 410
+    },
+    "label_pct": {
+      "Chorus": 27.1,
+      "Verse": 21.8,
+      "Other": 20.3,
+      "Instrumental": 11.8,
+      "Intro": 8.1,
+      "Silence": 6.4,
+      "Outro": 4.5
+    },
+    "dataset_distribution": {
+      "harmonix": 5207,
+      "salami": 3951
+    },
+    "segment_duration": {
+      "min": 0.0,
+      "max": 293.53,
+      "mean": 21.27
+    }
+  },
+  "val": {
+    "n_songs": 270,
+    "n_segments": 2944,
+    "avg_segs_per_song": 10.9,
+    "label_counts": {
+      "Chorus": 834,
+      "Verse": 622,
+      "Other": 608,
+      "Instrumental": 295,
+      "Intro": 256,
+      "Silence": 180,
+      "Outro": 149
+    },
+    "label_pct": {
+      "Chorus": 28.3,
+      "Verse": 21.1,
+      "Other": 20.7,
+      "Instrumental": 10.0,
+      "Intro": 8.7,
+      "Silence": 6.1,
+      "Outro": 5.1
+    },
+    "dataset_distribution": {
+      "harmonix": 1775,
+      "salami": 1169
+    },
+    "segment_duration": {
+      "min": 0.0,
+      "max": 245.75,
+      "mean": 22.33
+    }
+  },
+  "test": {
+    "n_songs": 270,
+    "n_segments": 2987,
+    "avg_segs_per_song": 11.1,
+    "label_counts": {
+      "Chorus": 833,
+      "Other": 652,
+      "Verse": 626,
+      "Instrumental": 312,
+      "Intro": 246,
+      "Silence": 181,
+      "Outro": 137
+    },
+    "label_pct": {
+      "Chorus": 27.9,
+      "Other": 21.8,
+      "Verse": 21.0,
+      "Instrumental": 10.4,
+      "Intro": 8.2,
+      "Silence": 6.1,
+      "Outro": 4.6
+    },
+    "dataset_distribution": {
+      "harmonix": 1750,
+      "salami": 1237
+    },
+    "segment_duration": {
+      "min": 0.0,
+      "max": 279.96,
+      "mean": 22.38
+    }
+  }
+}
