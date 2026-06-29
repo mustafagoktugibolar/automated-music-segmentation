@@ -1,2 +1,0 @@
-run_id,label,timestamp,n_tracks,n_ok,precision,recall,f_measure,zero_f1,tolerance,params
-20260612-151638-smoke-test,smoke-test,2026-06-12 15:16:57,5,5,0.0969,0.1571,0.1167,1,0.5,{}
