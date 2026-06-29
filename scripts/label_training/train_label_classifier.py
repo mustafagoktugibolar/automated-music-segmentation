@@ -72,14 +72,25 @@ META_COLS        = {
 # Data loading
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def load_dataset(path: str) -> "pd.DataFrame":
+def load_dataset(path: str, extra_parquets: list[str] | None = None) -> "pd.DataFrame":
     import pandas as pd
     if not os.path.exists(path):
         print(f"[error] Training data not found: {path}")
         print("        Run scripts/label_training/prepare_label_dataset.py first.")
         sys.exit(1)
     df = pd.read_parquet(path)
-    print(f"Loaded {len(df)} segments from {df['song_id'].nunique()} songs.")
+    print(f"Loaded {len(df)} segments from {df['song_id'].nunique()} songs  [{path}]")
+
+    for extra in (extra_parquets or []):
+        if not os.path.exists(extra):
+            print(f"[warn] Extra parquet not found, skipping: {extra}")
+            continue
+        extra_df = pd.read_parquet(extra)
+        print(f"  + {len(extra_df)} segments from {extra_df['song_id'].nunique()} songs  [{extra}]")
+        df = pd.concat([df, extra_df], ignore_index=True)
+
+    if extra_parquets:
+        print(f"Combined: {len(df)} segments from {df['song_id'].nunique()} songs.")
     return df
 
 
@@ -523,11 +534,13 @@ def main() -> None:
     parser.add_argument("--seeds",        nargs="+", type=int, default=DEFAULT_SEEDS)
     parser.add_argument("--no-multi-seed", action="store_true",
                         help="Skip multi-seed evaluation; run only seed=args.seeds[0]")
+    parser.add_argument("--extra-parquet", nargs="*", default=[],
+                        help="Additional parquet files to merge (e.g. harmonix_segments.parquet).")
     args = parser.parse_args()
 
     # ── Load ──────────────────────────────────────────────────────────────────
     import pandas as pd
-    df = load_dataset(args.input)
+    df = load_dataset(args.input, extra_parquets=args.extra_parquet or [])
     df = apply_label_merge(df, args.merge_mode)
 
     print(f"\nLabel distribution:\n{df['label'].value_counts().to_string()}")

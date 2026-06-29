@@ -9,6 +9,9 @@
 /data/eval_runs/
 data/label_training/
 
+# Harmonix dataset (large binary + downloaded annotations)
+data/harmonix/
+
 # Logs and caches
 /logs/
 /.cache/
