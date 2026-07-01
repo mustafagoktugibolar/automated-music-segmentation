@@ -194,7 +194,8 @@ class SegmentSequenceModel(nn.Module):
     """Input projection → BiLSTM → emission head → CRF."""
 
     def __init__(self, input_dim: int, hidden_dim: int, num_tags: int,
-                 num_layers: int = 2, dropout: float = 0.3) -> None:
+                 num_layers: int = 2, dropout: float = 0.3,
+                 use_attention: bool = False, attn_heads: int = 4) -> None:
         super().__init__()
         self.proj = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -207,22 +208,38 @@ class SegmentSequenceModel(nn.Module):
             batch_first=True, bidirectional=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
+        self.use_attention = use_attention
+        if use_attention:
+            embed_dim = hidden_dim * 2
+            self.attn      = nn.MultiheadAttention(embed_dim, num_heads=attn_heads,
+                                                   dropout=dropout, batch_first=True)
+            self.attn_norm = nn.LayerNorm(embed_dim)
         self.emission_head = nn.Linear(hidden_dim * 2, num_tags)
         self.crf           = CRF(num_tags)
         self.num_tags      = num_tags
 
-    def _emit(self, x: torch.Tensor) -> torch.Tensor:
+    def _emit(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """x: (B, L, D) padded → emissions (B, L, K)."""
         h, _ = self.bilstm(self.proj(x))
+        if self.use_attention and mask is not None:
+            # key_padding_mask: True = ignore (PyTorch convention) → invert our mask
+            attn_out, _ = self.attn(h, h, h, key_padding_mask=~mask)
+            h = self.attn_norm(h + attn_out)
         return self.emission_head(h)
 
     def forward(
         self, x: torch.Tensor, tags: torch.Tensor, mask: torch.Tensor,
         class_weights: torch.Tensor | None = None, lambda_ce: float = 0.4,
         crf_reg: float = 0.0, label_smoothing: float = 0.0,
+        noise_sigma: float = 0.0,
     ) -> torch.Tensor:
         """Training forward. Returns combined loss."""
-        emissions = self._emit(x)                                    # (B,L,K)
+        if self.training and noise_sigma > 0.0:
+            noise = torch.randn(x.shape[0], x.shape[1], 60,
+                                device=x.device, dtype=x.dtype) * noise_sigma
+            x = x.clone()
+            x[:, :, :60] = x[:, :, :60] + noise * mask.unsqueeze(-1)
+        emissions = self._emit(x, mask)                              # (B,L,K)
         crf_loss  = self.crf.neg_log_likelihood(emissions, tags, mask,
                                                 crf_reg=crf_reg)
 
@@ -239,7 +256,7 @@ class SegmentSequenceModel(nn.Module):
     @torch.no_grad()
     def predict(self, x: torch.Tensor, mask: torch.Tensor) -> list[list[int]]:
         """Inference; returns per-song decoded tag lists."""
-        emissions = self._emit(x)
+        emissions = self._emit(x, mask)
         return self.crf.viterbi(emissions, mask)
 
 
@@ -311,6 +328,64 @@ def _eval_split(
     return acc, macro, pc
 
 
+# ── GBDT stacking helper (OOF) ────────────────────────────────────────────────
+
+def _train_stacking_gbdt_oof(
+    df_train: "pd.DataFrame",
+    feature_cols: list,
+    le,
+    K: int,
+    args,
+    seed: int,
+):
+    """OOF stacking: each training segment is predicted by a GBDT that was NOT
+    trained on its song. This prevents leakage into BiLSTM-CRF training.
+    Returns (final_booster, oof_proba array of shape (N_train, K)).
+    """
+    import lightgbm as lgb
+    from sklearn.model_selection import GroupKFold
+
+    X_tr = df_train[feature_cols].values.astype(np.float32)
+    y_tr = le.transform(df_train["label"].values)
+    groups = df_train["raw_track_id"].values
+
+    params = dict(
+        objective        = "multiclass",
+        num_class        = K,
+        num_leaves       = args.gbdt_num_leaves,
+        max_depth        = 5,
+        learning_rate    = 0.05,
+        min_child_samples= 20,
+        reg_lambda       = 1.0,
+        subsample        = 0.8,
+        colsample_bytree = 0.8,
+        seed             = seed,
+        verbose          = -1,
+        n_jobs           = -1,
+    )
+
+    oof_proba = np.zeros((len(X_tr), K), dtype=np.float32)
+    gkf = GroupKFold(n_splits=5)
+    for fold_tr_idx, fold_va_idx in gkf.split(X_tr, y_tr, groups):
+        bst_fold = lgb.train(
+            params,
+            lgb.Dataset(X_tr[fold_tr_idx], label=y_tr[fold_tr_idx]),
+            num_boost_round = args.gbdt_n_rounds,
+            valid_sets      = [lgb.Dataset(X_tr[fold_va_idx], label=y_tr[fold_va_idx])],
+            callbacks       = [lgb.early_stopping(30, verbose=False), lgb.log_evaluation(period=-1)],
+        )
+        oof_proba[fold_va_idx] = bst_fold.predict(X_tr[fold_va_idx])
+
+    # Final model trained on ALL train data → used for val/test at inference
+    bst_final = lgb.train(
+        params,
+        lgb.Dataset(X_tr, label=y_tr),
+        num_boost_round = args.gbdt_n_rounds,
+        callbacks       = [lgb.log_evaluation(period=-1)],
+    )
+    return bst_final, oof_proba
+
+
 # ── Main per-seed run ─────────────────────────────────────────────────────────
 
 def run_seed(
@@ -344,9 +419,24 @@ def run_seed(
     df_test  = df.iloc[test_idx].reset_index(drop=True)
 
     # ── StandardScaler (fit on train only) ───────────────────────────────────
+    K = len(le.classes_)
     scaler = StandardScaler()
     X_tr_raw = df_train[feature_cols].values.astype(np.float32)
     scaler.fit(X_tr_raw)
+
+    # ── GBDT stacking (OOF predictions for train — no leakage) ──────────────
+    aug_feature_cols = feature_cols
+    if args.gbdt_stack:
+        gbdt_bst, gbdt_oof_proba = _train_stacking_gbdt_oof(
+            df_train     = df_train,
+            feature_cols = feature_cols,
+            le           = le,
+            K            = K,
+            args         = args,
+            seed         = seed,
+        )
+        gbdt_prob_cols   = [f"gbdt_p_{c}" for c in le.classes_]
+        aug_feature_cols = feature_cols + gbdt_prob_cols
 
     def _scale_df(sub: "pd.DataFrame") -> "pd.DataFrame":
         sub = sub.copy()
@@ -359,12 +449,24 @@ def run_seed(
     df_val_s   = _scale_df(df_val)
     df_test_s  = _scale_df(df_test)
 
-    train_seqs = build_sequences(df_train_s, feature_cols, le)
-    val_seqs   = build_sequences(df_val_s,   feature_cols, le)
-    test_seqs  = build_sequences(df_test_s,  feature_cols, le)
+    # Append GBDT probabilities to scaled dfs (proba stay unscaled, in [0,1])
+    if args.gbdt_stack:
+        # Train: OOF predictions (no leakage — each song predicted out-of-fold)
+        for j, col in enumerate(gbdt_prob_cols):
+            df_train_s[col] = gbdt_oof_proba[:, j]
+        # Val / Test: final model trained on all training data
+        for raw_df, scaled_df in [(df_val, df_val_s), (df_test, df_test_s)]:
+            proba = gbdt_bst.predict(
+                raw_df[feature_cols].values.astype(np.float32)
+            )
+            for j, col in enumerate(gbdt_prob_cols):
+                scaled_df[col] = proba[:, j]
+
+    train_seqs = build_sequences(df_train_s, aug_feature_cols, le)
+    val_seqs   = build_sequences(df_val_s,   aug_feature_cols, le)
+    test_seqs  = build_sequences(df_test_s,  aug_feature_cols, le)
 
     # ── Class weights (from train) ────────────────────────────────────────────
-    K = len(le.classes_)
     counts = np.bincount(
         le.transform(df_train["label"].values), minlength=K
     ).astype(np.float32)
@@ -374,17 +476,19 @@ def run_seed(
 
     # ── Model ─────────────────────────────────────────────────────────────────
     model = SegmentSequenceModel(
-        input_dim  = len(feature_cols),
-        hidden_dim = args.hidden_dim,
-        num_tags   = K,
-        num_layers = args.num_layers,
-        dropout    = args.dropout,
+        input_dim     = len(aug_feature_cols),
+        hidden_dim    = args.hidden_dim,
+        num_tags      = K,
+        num_layers    = args.num_layers,
+        dropout       = args.dropout,
+        use_attention = args.use_attention,
+        attn_heads    = args.attn_heads,
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
                                  weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", patience=8, factor=0.5, min_lr=1e-5,
+        optimizer, mode="max", patience=10, factor=0.5, min_lr=1e-5,
     )
 
     best_val_f1   = -1.0
@@ -405,7 +509,8 @@ def run_seed(
             optimizer.zero_grad()
             loss = model(Xb, yb, mb, class_weights=weights,
                          lambda_ce=args.lambda_ce, crf_reg=args.crf_reg,
-                         label_smoothing=args.label_smoothing)
+                         label_smoothing=args.label_smoothing,
+                         noise_sigma=args.noise_sigma)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -452,18 +557,22 @@ def run_seed(
             labels=list(range(K)), target_names=list(le.classes_),
             zero_division=0,
         ))
-        print(f"  seed={seed:5d} | val_F1={val_f12:.4f} | test_F1={te_f1:.4f}")
+        print(f"  seed={seed:5d} | train_F1={tr_f1:.4f} | val_F1={val_f12:.4f} | test_F1={te_f1:.4f}")
+        print(f"  train–val gap: {tr_f1 - val_f12:+.4f}  |  val–test gap: {val_f12 - te_f1:+.4f}")
 
     return {
-        "seed":          seed,
-        "best_val_f1":   best_val_f1,
-        "val_acc":       val_acc2,
-        "val_macro_f1":  val_f12,
-        "test_acc":      te_acc,
-        "test_macro_f1": te_f1,
-        "per_class_f1":  {le.classes_[i]: v for i, v in te_pc.items()},
-        "model_state":   best_state,
-        "scaler":        scaler,
+        "seed":             seed,
+        "best_val_f1":      best_val_f1,
+        "train_acc":        tr_acc,
+        "train_macro_f1":   tr_f1,
+        "val_acc":          val_acc2,
+        "val_macro_f1":     val_f12,
+        "test_acc":         te_acc,
+        "test_macro_f1":    te_f1,
+        "per_class_f1":     {le.classes_[i]: v for i, v in te_pc.items()},
+        "model_state":      best_state,
+        "scaler":           scaler,
+        "aug_feature_cols": aug_feature_cols,
     }
 
 
@@ -484,20 +593,36 @@ def main() -> None:
     parser.add_argument("--val-size",     type=float, default=0.20)
     parser.add_argument("--test-size",    type=float, default=0.20)
     # Model hyper-parameters
-    parser.add_argument("--hidden-dim",   type=int,   default=64)
+    parser.add_argument("--hidden-dim",   type=int,   default=128)
     parser.add_argument("--num-layers",   type=int,   default=1)
     parser.add_argument("--dropout",      type=float, default=0.5)
     parser.add_argument("--lr",           type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-3)
-    parser.add_argument("--epochs",       type=int,   default=120)
+    parser.add_argument("--epochs",       type=int,   default=150)
     parser.add_argument("--batch-size",   type=int,   default=32)
-    parser.add_argument("--patience",     type=int,   default=12)
+    parser.add_argument("--patience",     type=int,   default=18)
     parser.add_argument("--lambda-ce",    type=float, default=0.4,
                         help="Weight for class-weighted CE auxiliary loss.")
     parser.add_argument("--crf-reg",      type=float, default=0.01,
                         help="L2 penalty weight on CRF transition matrix.")
     parser.add_argument("--label-smoothing", type=float, default=0.1,
                         help="Label smoothing for auxiliary CE loss.")
+    # Stacking
+    parser.add_argument("--gbdt-stack",      action="store_true", default=False,
+                        help="Append per-seed GBDT class probabilities as 7 extra features.")
+    parser.add_argument("--gbdt-num-leaves", type=int,   default=31,
+                        help="num_leaves for the stacking LightGBM.")
+    parser.add_argument("--gbdt-n-rounds",   type=int,   default=500,
+                        help="Max boosting rounds for stacking GBDT (early-stopped).")
+    # Attention
+    parser.add_argument("--use-attention",   action="store_true", default=False,
+                        help="Add multi-head self-attention after BiLSTM.")
+    parser.add_argument("--attn-heads",      type=int,   default=4,
+                        help="Number of attention heads (must divide hidden_dim*2).")
+    # Regularization
+    parser.add_argument("--noise-sigma",     type=float, default=0.0,
+                        help="Gaussian noise std on acoustic features during training. "
+                             "0 = disabled. Recommended: 0.05.")
     args = parser.parse_args()
 
     if args.no_multi_seed:
@@ -538,36 +663,46 @@ def main() -> None:
         if result["best_val_f1"] > best_val_f1:
             best_val_f1 = result["best_val_f1"]
             best_result = result
-        print(f"  seed={seed:5d} | val_F1={result['val_macro_f1']:.4f} "
+        print(f"  seed={seed:5d} | train_F1={result['train_macro_f1']:.4f} "
+              f"| val_F1={result['val_macro_f1']:.4f} "
               f"| test_F1={result['test_macro_f1']:.4f}")
 
     elapsed = time.perf_counter() - t0
-    test_f1s = [r["test_macro_f1"] for r in all_results]
-    val_f1s  = [r["val_macro_f1"]  for r in all_results]
+    test_f1s  = [r["test_macro_f1"]  for r in all_results]
+    val_f1s   = [r["val_macro_f1"]   for r in all_results]
+    train_f1s = [r["train_macro_f1"] for r in all_results]
 
-    print(f"\n  Val  Macro-F1: {np.mean(val_f1s):.3f} ± {np.std(val_f1s):.3f}")
-    print(f"  Test Macro-F1: {np.mean(test_f1s):.3f} ± {np.std(test_f1s):.3f}")
-    print(f"  Val–Test gap : {np.mean(val_f1s)-np.mean(test_f1s):+.3f}")
+    print(f"\n  Train Macro-F1: {np.mean(train_f1s):.3f} ± {np.std(train_f1s):.3f}")
+    print(f"  Val   Macro-F1: {np.mean(val_f1s):.3f} ± {np.std(val_f1s):.3f}")
+    print(f"  Test  Macro-F1: {np.mean(test_f1s):.3f} ± {np.std(test_f1s):.3f}")
+    print(f"  Train–Val gap : {np.mean(train_f1s)-np.mean(val_f1s):+.3f}")
+    print(f"  Val–Test gap  : {np.mean(val_f1s)-np.mean(test_f1s):+.3f}")
     print(f"  Total time   : {elapsed:.1f}s")
 
     # ── Save best model ───────────────────────────────────────────────────────
     os.makedirs(MODELS_DIR, exist_ok=True)
     model_path = os.path.join(MODELS_DIR,
                               f"segment_label_seq_{args.merge_mode}.pt")
+    _aug_cols = best_result["aug_feature_cols"]
     torch.save({
         "model_state":   best_result["model_state"],
         "scaler_mean":   best_result["scaler"].mean_,
         "scaler_scale":  best_result["scaler"].scale_,
         "label_encoder": le,
-        "feature_names": feature_cols,
+        "feature_names": _aug_cols,
         "classes":       list(le.classes_),
         "merge_mode":    args.merge_mode,
         "config": {
-            "input_dim":  len(feature_cols),
-            "hidden_dim": args.hidden_dim,
-            "num_layers": args.num_layers,
-            "dropout":    args.dropout,
-            "num_tags":   K,
+            "input_dim":       len(_aug_cols),
+            "hidden_dim":      args.hidden_dim,
+            "num_layers":      args.num_layers,
+            "dropout":         args.dropout,
+            "num_tags":        K,
+            "use_attention":   args.use_attention,
+            "attn_heads":      args.attn_heads,
+            "gbdt_stack":      args.gbdt_stack,
+            "noise_sigma":     args.noise_sigma,
+            "n_acoustic_feat": 60,
         },
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "val_macro_f1":  float(np.mean(val_f1s)),
@@ -580,19 +715,23 @@ def main() -> None:
     out = {
         "merge_mode":    args.merge_mode,
         "classes":       list(le.classes_),
-        "n_features":    len(feature_cols),
+        "n_features":    len(_aug_cols),
         "seeds":         args.seeds,
+        "train_macro_f1_mean": float(np.mean(train_f1s)),
+        "train_macro_f1_std":  float(np.std(train_f1s)),
         "val_macro_f1_mean":  float(np.mean(val_f1s)),
         "val_macro_f1_std":   float(np.std(val_f1s)),
         "test_macro_f1_mean": float(np.mean(test_f1s)),
         "test_macro_f1_std":  float(np.std(test_f1s)),
+        "train_val_gap":      float(np.mean(train_f1s) - np.mean(val_f1s)),
         "val_test_gap":       float(np.mean(val_f1s) - np.mean(test_f1s)),
         "per_seed": [
             {
-                "seed":          r["seed"],
-                "val_macro_f1":  r["val_macro_f1"],
-                "test_macro_f1": r["test_macro_f1"],
-                "per_class_f1":  r["per_class_f1"],
+                "seed":           r["seed"],
+                "train_macro_f1": r["train_macro_f1"],
+                "val_macro_f1":   r["val_macro_f1"],
+                "test_macro_f1":  r["test_macro_f1"],
+                "per_class_f1":   r["per_class_f1"],
             }
             for r in all_results
         ],
@@ -608,7 +747,7 @@ def main() -> None:
     print(f"  SUMMARY  merge_mode={args.merge_mode}  BiLSTM-CRF")
     print(f"{'='*60}")
     print(f"  Classes  : {list(le.classes_)}")
-    print(f"  Features : {len(feature_cols)}")
+    print(f"  Features : {len(_aug_cols)}")
     print(f"  Epochs   : up to {args.epochs}  patience={args.patience}")
     print(f"\n  Split       Val F1    Test F1")
     print(f"  ----------------------------------")

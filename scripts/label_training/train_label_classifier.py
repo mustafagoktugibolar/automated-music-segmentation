@@ -55,13 +55,18 @@ MODEL_JOBLIB = os.path.join(MODELS_DIR, "segment_label_clf.joblib")
 MODEL_META   = os.path.join(MODELS_DIR, "segment_label_clf.meta.json")
 
 # ── Label merge config ────────────────────────────────────────────────────────
-# "none"       → original 9 classes unchanged
-# "transition" → Pre-Chorus + Bridge → Transition
-# "other"      → Pre-Chorus + Bridge → Other
+# "none"        → original 9 classes unchanged
+# "transition"  → Pre-Chorus + Bridge → Transition
+# "other"       → Pre-Chorus + Bridge → Other
+# "structured"  → Instrumental dropped; Pre-Chorus + Bridge kept as-is
+#                 Result: 8 classes — Chorus, Verse, Pre-Chorus, Bridge,
+#                         Intro, Outro, Silence, Other (truly unclassifiable)
+_DROP_SENTINEL = "__DROP__"
 _MERGE_MAPS: dict[str, dict[str, str]] = {
     "none":       {},
     "transition": {"Pre-Chorus": "Transition", "Bridge": "Transition"},
     "other":      {"Pre-Chorus": "Other",      "Bridge": "Other"},
+    "structured": {"Instrumental": _DROP_SENTINEL},
 }
 
 DEFAULT_SEEDS    = [42, 123, 2024, 7, 99]
@@ -145,11 +150,14 @@ def apply_label_merge(df: "pd.DataFrame", merge_mode: str) -> "pd.DataFrame":
     df = df.copy()
     n_before = df["label"].value_counts()
     df["label"] = df["label"].replace(mapping)
-    n_after = df["label"].value_counts()
     print(f"\nLabel merge (mode='{merge_mode}'):")
     for src, dst in mapping.items():
         cnt = n_before.get(src, 0)
-        print(f"  {src} → {dst}  ({cnt} segments)")
+        if dst == _DROP_SENTINEL:
+            print(f"  {src} → [DROPPED]  ({cnt} segments)")
+        else:
+            print(f"  {src} → {dst}  ({cnt} segments)")
+    df = df[df["label"] != _DROP_SENTINEL].reset_index(drop=True)
     print(f"Classes: {sorted(df['label'].unique())}")
     return df
 

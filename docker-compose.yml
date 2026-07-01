@@ -76,6 +76,13 @@ services:
     build:
       context: .
       dockerfile: workers/Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     volumes:
       - ./workers:/app/workers
       - ./shared:/app/shared

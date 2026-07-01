@@ -19,7 +19,8 @@ dependencies:
     - pyarrow
     - pydantic-settings
     - mir_eval
-    - --extra-index-url https://download.pytorch.org/whl/cpu
+    - lightgbm
+    - --extra-index-url https://download.pytorch.org/whl/cu124
     - torch
     - torchaudio
     - langchain-anthropic>=0.3
