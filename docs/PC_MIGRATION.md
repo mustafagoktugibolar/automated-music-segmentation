@@ -111,3 +111,4 @@ docker compose up -d
 | `data/label_training/*.parquet` | **Yok** | `prepare_label_dataset.py` çalıştır |
 | `models/*.joblib` | **Yok** | `train_label_classifier.py` çalıştır |
 | `models/evaluation/*.json/csv` | Var | Clone yeter |
+docker exec automated-music-segmentation-worker-custom-1 python /app/scripts/label_training/train_sequence_model.py --merge-mode other --extra-parquet /app/data/label_training/harmonix_segments.parquet
