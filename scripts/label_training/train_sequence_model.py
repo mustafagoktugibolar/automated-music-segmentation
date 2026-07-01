@@ -6,14 +6,20 @@ Treats each song as an ordered sequence of segments and learns both
 per-segment acoustics (BiLSTM) and structural grammar (CRF transitions).
 
 Architecture:
-  Input(87) → Linear(128) + LayerNorm + ReLU + Dropout
-             → BiLSTM(hidden=128, layers=2, dropout=0.3)
-             → Linear(K) [emissions]
-             → CRF (learned K×K transition matrix, from-scratch impl)
+  Input(D) → Linear(64) + LayerNorm + ReLU + Dropout(0.5)
+            → BiLSTM(hidden=64, layers=1)
+            → Linear(K) [emissions]
+            → CRF (learned K×K transition matrix + L2 reg, from-scratch impl)
 
-Loss = CRF negative log-likelihood
-     + λ · class-weighted cross-entropy on emissions
+Loss = CRF negative log-likelihood + crf_reg * ||transitions||²
+     + λ · class-weighted cross-entropy on emissions (label_smoothing=0.1)
      (λ=0.4 keeps rare class recall while CRF learns grammar)
+
+Regularization (overfitting fixes):
+  - dropout 0.5, weight_decay 1e-3, grad_clip 1.0, patience 12
+  - CRF transition L2 penalty (crf_reg=0.01)
+  - label smoothing 0.1 on aux CE loss
+  - reduced capacity: hidden_dim=64, num_layers=1
 
 Split: same GroupShuffleSplit(raw_track_id) as GBDT → honest comparison.
 Seeds: same DEFAULT_SEEDS → multi-seed mean±std reported.
@@ -21,6 +27,7 @@ Seeds: same DEFAULT_SEEDS → multi-seed mean±std reported.
 Usage:
     python scripts/label_training/train_sequence_model.py
     python scripts/label_training/train_sequence_model.py --merge-mode none
+    python scripts/label_training/train_sequence_model.py --feature-set acoustic
     python scripts/label_training/train_sequence_model.py \\
         --extra-parquet /app/data/label_training/harmonix_segments.parquet
 
@@ -51,8 +58,8 @@ from sklearn.preprocessing import StandardScaler
 
 # Re-use everything from GBDT trainer for identical split/data logic
 from train_label_classifier import (  # noqa: E402
-    load_dataset, apply_label_merge, build_features,
-    make_grouped_split, _MERGE_MAPS, DEFAULT_SEEDS, META_COLS,
+    load_dataset, apply_label_merge, build_features, select_feature_columns,
+    make_grouped_split, _MERGE_MAPS, DEFAULT_SEEDS,
 )
 
 MODELS_DIR   = os.path.join(_app_root, "models")
@@ -139,11 +146,15 @@ class CRF(nn.Module):
         emissions: torch.Tensor,
         tags: torch.Tensor,
         mask: torch.Tensor,
+        crf_reg: float = 0.0,
     ) -> torch.Tensor:
-        """Mean NLL over batch."""
+        """Mean NLL over batch, with optional L2 penalty on transition matrix."""
         gold  = self._score_sequence(emissions, tags, mask)
         logZ  = self._forward_alg(emissions, mask)
-        return (logZ - gold).mean()
+        nll   = (logZ - gold).mean()
+        if crf_reg > 0.0:
+            nll = nll + crf_reg * (self.transitions ** 2).sum()
+        return nll
 
     @torch.no_grad()
     def viterbi(
@@ -208,17 +219,20 @@ class SegmentSequenceModel(nn.Module):
     def forward(
         self, x: torch.Tensor, tags: torch.Tensor, mask: torch.Tensor,
         class_weights: torch.Tensor | None = None, lambda_ce: float = 0.4,
+        crf_reg: float = 0.0, label_smoothing: float = 0.0,
     ) -> torch.Tensor:
         """Training forward. Returns combined loss."""
         emissions = self._emit(x)                                    # (B,L,K)
-        crf_loss  = self.crf.neg_log_likelihood(emissions, tags, mask)
+        crf_loss  = self.crf.neg_log_likelihood(emissions, tags, mask,
+                                                crf_reg=crf_reg)
 
         if lambda_ce > 0 and class_weights is not None:
             # Flatten valid (unpadded) positions only
             flat_emit = emissions[mask]                              # (N_valid, K)
             flat_tags  = tags[mask]                                  # (N_valid,)
             ce_loss = F.cross_entropy(flat_emit, flat_tags,
-                                      weight=class_weights)
+                                      weight=class_weights,
+                                      label_smoothing=label_smoothing)
             return crf_loss + lambda_ce * ce_loss
         return crf_loss
 
@@ -390,9 +404,10 @@ def run_seed(
 
             optimizer.zero_grad()
             loss = model(Xb, yb, mb, class_weights=weights,
-                         lambda_ce=args.lambda_ce)
+                         lambda_ce=args.lambda_ce, crf_reg=args.crf_reg,
+                         label_smoothing=args.label_smoothing)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             total_loss += loss.item()
@@ -460,21 +475,29 @@ def main() -> None:
     parser.add_argument("--input",        default=PARQUET_PATH)
     parser.add_argument("--extra-parquet", nargs="*", default=[])
     parser.add_argument("--merge-mode",   default="none", choices=list(_MERGE_MAPS))
+    parser.add_argument("--feature-set",  default="full",
+                        choices=["full", "acoustic", "acoustic_context",
+                                 "no_context", "no_repetition"],
+                        help="Feature subset to use (same sets as GBDT ablation).")
     parser.add_argument("--seeds",        nargs="+", type=int, default=DEFAULT_SEEDS)
     parser.add_argument("--no-multi-seed", action="store_true")
     parser.add_argument("--val-size",     type=float, default=0.20)
     parser.add_argument("--test-size",    type=float, default=0.20)
     # Model hyper-parameters
-    parser.add_argument("--hidden-dim",   type=int,   default=128)
-    parser.add_argument("--num-layers",   type=int,   default=2)
-    parser.add_argument("--dropout",      type=float, default=0.3)
+    parser.add_argument("--hidden-dim",   type=int,   default=64)
+    parser.add_argument("--num-layers",   type=int,   default=1)
+    parser.add_argument("--dropout",      type=float, default=0.5)
     parser.add_argument("--lr",           type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--weight-decay", type=float, default=1e-3)
     parser.add_argument("--epochs",       type=int,   default=120)
     parser.add_argument("--batch-size",   type=int,   default=32)
-    parser.add_argument("--patience",     type=int,   default=20)
+    parser.add_argument("--patience",     type=int,   default=12)
     parser.add_argument("--lambda-ce",    type=float, default=0.4,
                         help="Weight for class-weighted CE auxiliary loss.")
+    parser.add_argument("--crf-reg",      type=float, default=0.01,
+                        help="L2 penalty weight on CRF transition matrix.")
+    parser.add_argument("--label-smoothing", type=float, default=0.1,
+                        help="Label smoothing for auxiliary CE loss.")
     args = parser.parse_args()
 
     if args.no_multi_seed:
@@ -490,11 +513,11 @@ def main() -> None:
 
     print(f"\nLabel distribution:\n{df['label'].value_counts().to_string()}")
 
-    feature_cols = [c for c in df.columns if c not in META_COLS]
-    from sklearn.preprocessing import LabelEncoder
-    le = LabelEncoder().fit(df["label"])
+    _, _, _, le, all_feature_cols = build_features(df)
+    feature_cols = select_feature_columns(all_feature_cols, args.feature_set)
     K  = len(le.classes_)
-    print(f"\nFeature matrix: {len(df)} rows × {len(feature_cols)} features | "
+    print(f"\nFeature matrix: {len(df)} rows × {len(feature_cols)} features "
+          f"(feature_set={args.feature_set}) | "
           f"Classes ({K}): {list(le.classes_)}")
 
     # ── Multi-seed run ────────────────────────────────────────────────────────
