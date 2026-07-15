@@ -27,7 +27,7 @@ DBSettings = DB_Settings()
 class App_Settings(BaseSettings):
     DATASOURCE_TYPE: str = "salami"  # 'salami' or 'local'
     LOCAL_AUDIO_DIR: str = "data/audio"
-    LABELING_METHOD: str = "heuristic"  # 'heuristic' or 'ml'
+    LABELING_METHOD: str = "heuristic"  # 'heuristic', 'ml' (GBDT), or 'ml_sequence' (BiLSTM-CRF)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
 

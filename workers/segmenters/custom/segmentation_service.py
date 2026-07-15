@@ -31,8 +31,10 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.cluster import KMeans
 
 from workers.infrastructure.audio.decoder import FFMPEG_BIN, load_audio
+from workers.infrastructure.audio.features import build_segment_descriptors_from_audio
 from workers.core.labeling.heuristic import assign_semantic_labels
 from workers.core.labeling.ml import predict_semantic_labels
+from workers.core.labeling.ml_sequence import predict_semantic_labels_sequence
 from shared.logger import get_logger
 from workers.segmenters.custom.multi_feature_fusion import (
     beat_phrase_boundary_candidates,
@@ -670,6 +672,8 @@ def _cluster_and_label_segments(
     ssm_thresh: np.ndarray | None = None,
     semantic_labeling_enabled: bool = True,
     labeling_method: str = "heuristic",
+    y_active: np.ndarray | None = None,
+    sr: int | None = None,
 ) -> list[dict]:
     """
     Build segments from boundary times, label by SSM repetition similarity
@@ -782,8 +786,18 @@ def _cluster_and_label_segments(
         seg.setdefault("label_method", label_method)
         seg.setdefault("label_confidence", 0.65 if label_method == "ssm_similarity" else 0.5)
 
-    if labeling_method == "ml":
-        return predict_semantic_labels(enforced, duration_seconds=total_dur)
+    if labeling_method in ("ml", "ml_sequence"):
+        descriptors = (
+            build_segment_descriptors_from_audio(y_active, sr, enforced)
+            if y_active is not None and sr is not None else None
+        )
+        if labeling_method == "ml_sequence":
+            return predict_semantic_labels_sequence(
+                enforced, descriptors=descriptors, duration_seconds=total_dur,
+            )
+        return predict_semantic_labels(
+            enforced, descriptors=descriptors, duration_seconds=total_dur,
+        )
     return assign_semantic_labels(
         enforced,
         duration_seconds=total_dur,
@@ -1167,6 +1181,8 @@ def _analyze_content(
         ssm_thresh=S_thresh,
         semantic_labeling_enabled=semantic_labeling_enabled,
         labeling_method=labeling_method,
+        y_active=y_active,
+        sr=sr,
     )
     logger.info("[%.2fs] %d segments after clustering", time.perf_counter() - t0, len(segments_core))
 
