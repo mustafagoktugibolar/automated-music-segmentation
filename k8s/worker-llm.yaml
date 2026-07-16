@@ -1,0 +1,36 @@
+# Kept at low, fixed replica count: LLM API latency, rate limits, and cost are
+# the bottleneck here, not compute — scaling replicas doesn't help throughput.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-llm
+  namespace: music-segmentation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-llm
+  template:
+    metadata:
+      labels:
+        app: worker-llm
+    spec:
+      containers:
+        - name: worker-llm
+          image: music-segmentation-worker:latest
+          envFrom:
+            - secretRef: { name: music-segmentation-env }
+          env:
+            - name: SERVICE_NAME
+              value: worker-llm
+            - name: WORKER_TYPE
+              value: llm_segmentation
+            - name: MESSAGE_CODE
+              value: segmentation.llm
+          volumeMounts:
+            - name: media-data
+              mountPath: /app/media
+      volumes:
+        - name: media-data
+          persistentVolumeClaim:
+            claimName: media-data

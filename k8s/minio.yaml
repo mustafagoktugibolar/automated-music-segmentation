@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: music-segmentation
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: music-segmentation
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: music-segmentation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef: { name: music-segmentation-env, key: MINIO_ROOT_USER }
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: music-segmentation-env, key: MINIO_ROOT_PASSWORD }
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+# One-shot job mirroring the compose `minio_init` service: creates the raw bucket.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: music-segmentation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: minio-init
+          image: minio/mc:latest
+          envFrom:
+            - secretRef: { name: music-segmentation-env }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+              mc mb --ignore-existing "local/$S3_BUCKET_RAW"

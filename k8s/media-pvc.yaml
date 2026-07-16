@@ -1,0 +1,17 @@
+# Shared media volume mounted by the backend and every worker Deployment,
+# mirroring the `media_data` volume in docker-compose.yml.
+#
+# Requires a StorageClass that supports ReadWriteMany (e.g. NFS, EFS, Azure Files,
+# Longhorn). If your cluster's default StorageClass is RWO-only, this PVC will stay
+# Pending. In that case, point workers/backend at MinIO/S3 for shared media instead
+# of a shared filesystem.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-data
+  namespace: music-segmentation
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 20Gi

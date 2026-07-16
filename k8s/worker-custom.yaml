@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-custom
+  namespace: music-segmentation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker-custom
+  template:
+    metadata:
+      labels:
+        app: worker-custom
+    spec:
+      containers:
+        - name: worker-custom
+          image: music-segmentation-worker:latest
+          envFrom:
+            - secretRef: { name: music-segmentation-env }
+          env:
+            - name: SERVICE_NAME
+              value: worker-custom
+            - name: WORKER_TYPE
+              value: custom_segmentation
+            - name: MESSAGE_CODE
+              value: segmentation.custom
+          volumeMounts:
+            - name: media-data
+              mountPath: /app/media
+          # GPU-enabled nodes (e.g. the RTX 3060 dev box): uncomment to schedule
+          # onto a node with an NVIDIA device plugin installed.
+          # resources:
+          #   limits:
+          #     nvidia.com/gpu: 1
+      volumes:
+        - name: media-data
+          persistentVolumeClaim:
+            claimName: media-data

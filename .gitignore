@@ -26,6 +26,11 @@ data/harmonix/
 # Word/Office temp files
 docs/~$*
 
+# Personal/academic reports and slides (not part of the public project docs)
+docs/*.docx
+docs/*.pptx
+docs/*.xlsx
+
 # Node
 /frontend/music-segmentation-ui/node_modules/
 # Byte-compiled / optimized / DLL files

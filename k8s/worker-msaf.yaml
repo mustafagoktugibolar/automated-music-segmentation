@@ -1,0 +1,98 @@
+# MSAF baseline segmenters: Foote, CNMF, SCluster. Each runs as its own
+# Deployment/queue (segmentation.foote / .cnmf / .scluster) so they can be
+# scaled and monitored independently, matching docker-compose.yml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-msaf-foote
+  namespace: music-segmentation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker-msaf-foote
+  template:
+    metadata:
+      labels:
+        app: worker-msaf-foote
+    spec:
+      containers:
+        - name: worker-msaf-foote
+          image: music-segmentation-worker:latest
+          envFrom:
+            - secretRef: { name: music-segmentation-env }
+          env:
+            - name: SERVICE_NAME
+              value: worker-msaf-foote
+            - name: WORKER_TYPE
+              value: msaf_segmentation
+            - name: MESSAGE_CODE
+              value: segmentation.foote
+            - name: MSAF_ALGORITHM
+              value: foote
+            - name: WORKER_CONCURRENCY
+              value: "1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-msaf-cnmf
+  namespace: music-segmentation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker-msaf-cnmf
+  template:
+    metadata:
+      labels:
+        app: worker-msaf-cnmf
+    spec:
+      containers:
+        - name: worker-msaf-cnmf
+          image: music-segmentation-worker:latest
+          envFrom:
+            - secretRef: { name: music-segmentation-env }
+          env:
+            - name: SERVICE_NAME
+              value: worker-msaf-cnmf
+            - name: WORKER_TYPE
+              value: msaf_segmentation
+            - name: MESSAGE_CODE
+              value: segmentation.cnmf
+            - name: MSAF_ALGORITHM
+              value: cnmf
+            - name: WORKER_CONCURRENCY
+              value: "1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-msaf-scluster
+  namespace: music-segmentation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker-msaf-scluster
+  template:
+    metadata:
+      labels:
+        app: worker-msaf-scluster
+    spec:
+      containers:
+        - name: worker-msaf-scluster
+          image: music-segmentation-worker:latest
+          envFrom:
+            - secretRef: { name: music-segmentation-env }
+          env:
+            - name: SERVICE_NAME
+              value: worker-msaf-scluster
+            - name: WORKER_TYPE
+              value: msaf_segmentation
+            - name: MESSAGE_CODE
+              value: segmentation.scluster
+            - name: MSAF_ALGORITHM
+              value: scluster
+            - name: WORKER_CONCURRENCY
+              value: "1"

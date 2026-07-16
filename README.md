@@ -16,7 +16,7 @@ This project uses Docker and Docker Compose to manage all services, including ba
 
     Clone the project to your local machine.
     ```bash
-    git clone <https://github.com/mustafagoktugibolar/automated-music-segmentation.git>
+    git clone https://github.com/mustafagoktugibolar/automated-music-segmentation.git
     cd music-segmentation
     ```
 
@@ -133,7 +133,7 @@ docker-compose down -v
 
 ## Deployment on Kubernetes
 
-For production and full-dataset batch runs, the stack is deployed to a Kubernetes cluster instead of `docker-compose`. The backend API, PostgreSQL, RabbitMQ, MinIO, and the segmentation workers each run as their own `Deployment`/`StatefulSet` with a matching `Service`, defined under `k8s/`.
+For production and full-dataset batch runs, the stack is deployed to a Kubernetes cluster instead of `docker-compose`. The backend API, frontend, PostgreSQL, RabbitMQ, MinIO, and each segmentation worker (`worker-custom`, `worker-msaf-foote`, `worker-msaf-cnmf`, `worker-msaf-scluster`, `worker-fusion`, `worker-llm`) run as their own `Deployment`/`StatefulSet` with a matching `Service`, defined under [k8s/](k8s/). See [k8s/README.md](k8s/README.md) for image build/push steps and secret setup before applying.
 
 1.  **Apply the manifests**
 
@@ -144,17 +144,17 @@ For production and full-dataset batch runs, the stack is deployed to a Kubernete
 2.  **Check rollout status**
 
     ```bash
-    kubectl get pods -l app=music-segmentation
+    kubectl get pods -n music-segmentation
     ```
 
-    You should see `backend`, `worker-custom`, `worker-llm`, `postgres`, `rabbitmq`, and `minio` pods reach `Running`.
+    You should see `backend`, `frontend`, `worker-custom`, `worker-msaf-foote`, `worker-msaf-cnmf`, `worker-msaf-scluster`, `worker-fusion`, `worker-llm`, `music-segmentation-db`, `rabbitmq`, and `minio` pods reach `Running`.
 
 3.  **Access the API**
 
     Expose the backend `Service` (via `Ingress`, `LoadBalancer`, or `kubectl port-forward`) and check `/health`:
 
     ```bash
-    kubectl port-forward svc/backend 8000:8000
+    kubectl port-forward -n music-segmentation svc/backend 8000:8000
     curl http://localhost:8000/health
     ```
 
@@ -163,7 +163,7 @@ For production and full-dataset batch runs, the stack is deployed to a Kubernete
 The `worker-custom` Deployment is scaled independently of the rest of the stack. To run four worker pods with one active task per pod:
 
 ```bash
-kubectl scale deployment worker-custom --replicas=4
+kubectl scale deployment worker-custom --replicas=4 -n music-segmentation
 ```
 
 Then set the frontend `Batch Eval` concurrency to `4` (or use the `4 workers` preset).
@@ -173,7 +173,7 @@ If CPU stays below roughly 80% and memory stays comfortable across nodes during 
 For automatic scaling based on load, use a `HorizontalPodAutoscaler` targeting the `worker-custom` Deployment:
 
 ```bash
-kubectl autoscale deployment worker-custom --cpu-percent=70 --min=2 --max=8
+kubectl autoscale deployment worker-custom --cpu-percent=70 --min=2 --max=8 -n music-segmentation
 ```
 
 Keep `worker-llm` at a low, fixed replica count — API latency, rate limits, and cost are the bottleneck there, not compute.
@@ -181,7 +181,7 @@ Keep `worker-llm` at a low, fixed replica count — API latency, rate limits, an
 ### Logs and Teardown
 
 ```bash
-kubectl logs -f deployment/backend
+kubectl logs -f -n music-segmentation deployment/backend
 kubectl delete -f k8s/
 ```
 
