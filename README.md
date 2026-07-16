@@ -52,31 +52,11 @@ The entire application stack (backend + database) is managed by Docker Compose.
     Once the services are running, the API will be available at `http://localhost:8000`. You can test it by navigating to:
     `http://localhost:8000/health`
 
-### Full Dataset Batch Evaluation and Worker Scaling
+### Full Dataset Batch Evaluation
 
 The frontend `Batch Eval` page includes a `Run all dataset` option. It sends `max_tracks=0` to `POST /evaluation/batch`, so the backend evaluates every available SALAMI track found in MinIO with local annotations.
 
-For a 32 GB RAM / 8 core / 16 thread machine, start with four custom Librosa worker containers and one active task per container:
-
-```bash
-CUSTOM_WORKER_REPLICAS=4 WORKER_CONCURRENCY=1 docker compose up -d --build
-```
-
-This starts four `worker-custom` service instances, named by Docker Compose as `...worker-custom-1` through `...worker-custom-4`. In the frontend, set batch concurrency to `4` or use the `4 workers` preset.
-
-If CPU stays below roughly 80% and RAM stays below roughly 24 GB during a full run, you can try two tasks per custom worker:
-
-```bash
-CUSTOM_WORKER_REPLICAS=4 WORKER_CONCURRENCY=2 docker compose up -d --build
-```
-
-Then set frontend batch concurrency to `8`. Keep the LLM worker at low concurrency because API latency, rate limits, and cost become the bottleneck.
-
-You can also change the custom worker count without editing `.env`:
-
-```bash
-CUSTOM_WORKER_REPLICAS=2 WORKER_CONCURRENCY=1 docker compose up -d --build
-```
+Set the frontend's batch concurrency to match the number of ready `worker-custom` pod replicas in the cluster (see [Deployment on Kubernetes](#deployment-on-kubernetes)). Keep the LLM worker at low concurrency regardless of replica count, because API latency, rate limits, and cost become the bottleneck.
 
 ## API Endpoints
 
@@ -149,6 +129,60 @@ docker-compose down
 To stop the services and remove the database volume (deleting all data):
 ```bash
 docker-compose down -v
+```
+
+## Deployment on Kubernetes
+
+For production and full-dataset batch runs, the stack is deployed to a Kubernetes cluster instead of `docker-compose`. The backend API, PostgreSQL, RabbitMQ, MinIO, and the segmentation workers each run as their own `Deployment`/`StatefulSet` with a matching `Service`, defined under `k8s/`.
+
+1.  **Apply the manifests**
+
+    ```bash
+    kubectl apply -f k8s/
+    ```
+
+2.  **Check rollout status**
+
+    ```bash
+    kubectl get pods -l app=music-segmentation
+    ```
+
+    You should see `backend`, `worker-custom`, `worker-llm`, `postgres`, `rabbitmq`, and `minio` pods reach `Running`.
+
+3.  **Access the API**
+
+    Expose the backend `Service` (via `Ingress`, `LoadBalancer`, or `kubectl port-forward`) and check `/health`:
+
+    ```bash
+    kubectl port-forward svc/backend 8000:8000
+    curl http://localhost:8000/health
+    ```
+
+### Scaling Workers
+
+The `worker-custom` Deployment is scaled independently of the rest of the stack. To run four worker pods with one active task per pod:
+
+```bash
+kubectl scale deployment worker-custom --replicas=4
+```
+
+Then set the frontend `Batch Eval` concurrency to `4` (or use the `4 workers` preset).
+
+If CPU stays below roughly 80% and memory stays comfortable across nodes during a full run, increase per-pod concurrency via the `WORKER_CONCURRENCY` environment variable in the Deployment spec and set frontend concurrency to match (e.g. `8` for four pods at concurrency `2`).
+
+For automatic scaling based on load, use a `HorizontalPodAutoscaler` targeting the `worker-custom` Deployment:
+
+```bash
+kubectl autoscale deployment worker-custom --cpu-percent=70 --min=2 --max=8
+```
+
+Keep `worker-llm` at a low, fixed replica count — API latency, rate limits, and cost are the bottleneck there, not compute.
+
+### Logs and Teardown
+
+```bash
+kubectl logs -f deployment/backend
+kubectl delete -f k8s/
 ```
 
 ## Automated Music Segmentation Pipeline
