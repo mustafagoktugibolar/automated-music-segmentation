@@ -1,6 +1,5 @@
 import os
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 
 import aiofiles
@@ -17,12 +16,6 @@ logger = get_logger()
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "media/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-
-@dataclass
-class SongInfo:
-    song_id: str
-    url: str
 
 
 class SegmentationOrchestrator:

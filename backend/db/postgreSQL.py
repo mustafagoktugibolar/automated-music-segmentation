@@ -1,9 +1,8 @@
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request
 from shared.config import DBSettings
 from contextlib import asynccontextmanager
 from psycopg2.pool import ThreadedConnectionPool
-from psycopg2.extras import RealDictCursor
-from typing import Generator, Optional
+from typing import Optional
 from shared.logger import get_logger
 
 import psycopg2
@@ -79,23 +78,6 @@ async def close_db_pool(app: FastAPI):
     except Exception as e:
         logger.error("[DB] Error closing connection pool.", exc_info=True)
 
-
-def get_db_conn(request: Request) -> Generator:
-    pool: ThreadedConnectionPool = request.app.state.db_pool
-    conn = pool.getconn()
-    try:
-        prepare_db_connection(conn)
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        pool.putconn(conn)
-        
-def get_cursor(conn = Depends(get_db_conn)):
-    with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-        yield cursor
 
 def ping_db(request: Request) -> bool:
     pool: ThreadedConnectionPool = request.app.state.db_pool
