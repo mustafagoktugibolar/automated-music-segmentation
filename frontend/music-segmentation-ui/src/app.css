@@ -119,3 +119,81 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── Segmentation Lab design system ─────────────────────────────────────── */
+[data-theme="dark"] {
+  --msp-bg: oklch(19% .006 260);
+  --msp-bg-elevated: oklch(22% .007 260);
+  --msp-panel: oklch(24% .008 260);
+  --msp-panel-2: oklch(28% .009 260);
+  --msp-border: oklch(32% .01 260);
+  --msp-border-strong: oklch(42% .012 260);
+  --msp-text: oklch(94% .003 260);
+  --msp-text-dim: oklch(74% .01 260);
+  --msp-text-faint: oklch(56% .012 260);
+  --msp-accent: oklch(78% .13 195);
+  --msp-accent-ink: oklch(19% .01 195);
+  --msp-accent-bg: oklch(30% .05 195);
+  --msp-ok: oklch(75% .14 150);
+  --msp-warn: oklch(78% .14 80);
+  --msp-danger: oklch(68% .17 25);
+  --msp-sem-intro: oklch(70% .11 235);
+  --msp-sem-verse: oklch(72% .11 165);
+  --msp-sem-prechorus: oklch(74% .11 100);
+  --msp-sem-chorus: oklch(72% .15 40);
+  --msp-sem-bridge: oklch(72% .11 300);
+  --msp-sem-instrumental: oklch(76% .11 70);
+  --msp-sem-outro: oklch(64% .09 235);
+  --msp-sem-unknown: oklch(55% .006 260);
+  --msp-alg-fusion: oklch(78% .13 195);
+  --msp-alg-librosa: oklch(72% .13 250);
+  --msp-alg-foote: oklch(78% .13 80);
+  --msp-alg-cnmf: oklch(74% .13 300);
+  --msp-alg-scluster: oklch(72% .15 15);
+  --msp-alg-gt: oklch(85% .003 260);
+}
+
+[data-theme="light"] {
+  --msp-bg: oklch(97% .003 260);
+  --msp-bg-elevated: oklch(99% .002 260);
+  --msp-panel: oklch(99% .002 260);
+  --msp-panel-2: oklch(94% .004 260);
+  --msp-border: oklch(88% .006 260);
+  --msp-border-strong: oklch(78% .008 260);
+  --msp-text: oklch(20% .006 260);
+  --msp-text-dim: oklch(42% .01 260);
+  --msp-text-faint: oklch(58% .01 260);
+  --msp-accent: oklch(52% .13 195);
+  --msp-accent-ink: oklch(99% .003 195);
+  --msp-accent-bg: oklch(92% .04 195);
+  --msp-ok: oklch(55% .14 150);
+  --msp-warn: oklch(60% .14 80);
+  --msp-danger: oklch(55% .18 25);
+  --msp-sem-intro: oklch(55% .11 235);
+  --msp-sem-verse: oklch(55% .11 165);
+  --msp-sem-prechorus: oklch(58% .11 100);
+  --msp-sem-chorus: oklch(56% .16 40);
+  --msp-sem-bridge: oklch(55% .11 300);
+  --msp-sem-instrumental: oklch(58% .11 70);
+  --msp-sem-outro: oklch(48% .09 235);
+  --msp-sem-unknown: oklch(60% .006 260);
+  --msp-alg-fusion: oklch(52% .13 195);
+  --msp-alg-librosa: oklch(50% .13 250);
+  --msp-alg-foote: oklch(55% .13 80);
+  --msp-alg-cnmf: oklch(52% .13 300);
+  --msp-alg-scluster: oklch(52% .15 15);
+  --msp-alg-gt: oklch(25% .006 260);
+}
+
+@keyframes msp-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes msp-spin { to { transform: rotate(360deg); } }
+
+.msp-app {
+  font-family: "Manrope", system-ui, sans-serif;
+  background: var(--msp-bg);
+  color: var(--msp-text);
+}
+
+.msp-mono {
+  font-family: "JetBrains Mono", monospace;
+}

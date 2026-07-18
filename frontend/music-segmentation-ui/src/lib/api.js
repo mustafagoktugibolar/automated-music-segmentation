@@ -183,7 +183,7 @@ export function getEvaluation(evalId) {
 }
 
 /**
- * @param {{ maxTracks?: number, toleranceSeconds?: number, tolerances?: number[], algorithms?: string[], concurrency?: number, includeLLM?: boolean, llmMode?: string, coverageOutlierThreshold?: number }} options
+ * @param {{ maxTracks?: number, toleranceSeconds?: number, tolerances?: number[], algorithms?: string[], concurrency?: number, coverageOutlierThreshold?: number }} options
  */
 export function startBatchEval({
   maxTracks = 20,
@@ -191,8 +191,6 @@ export function startBatchEval({
   tolerances = [0.5, 3.0],
   algorithms = ["custom_librosa", "foote", "cnmf", "scluster", "fusion"],
   concurrency = 3,
-  includeLLM = false,
-  llmMode = "deterministic",
   coverageOutlierThreshold = 0.20,
 } = {}) {
   return apiFetch("/evaluation/batch", {
@@ -203,8 +201,6 @@ export function startBatchEval({
       tolerances,
       algorithms,
       concurrency,
-      include_llm: includeLLM,
-      llm_mode: llmMode,
       coverage_outlier_threshold: coverageOutlierThreshold,
     }),
   });
