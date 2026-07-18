@@ -1,4 +1,3 @@
-# This file is auto-generated from deployment.json. DO NOT EDIT MANUALLY.
 services:
   music_segmentation_db:
     container_name: music_segmentation_db
@@ -51,12 +50,11 @@ services:
     container_name: music_segmentation_backend
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: segmentation/api/Dockerfile
     ports:
       - 8000:8000
     volumes:
-      - ./backend:/app/backend
-      - ./shared:/app/shared
+      - ./segmentation:/app/segmentation
       - ./frontend:/app/frontend
       - ./logs:/app/logs
       - media_data:/app/media
@@ -75,18 +73,20 @@ services:
     image: music-segmentation-worker:latest
     build:
       context: .
-      dockerfile: workers/Dockerfile
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      dockerfile: segmentation/workers/Dockerfile
+    # GPU is opt-in, not required — this stack must come up on non-GPU hosts too.
+    # To reserve a GPU on a host that has the nvidia container runtime, add via
+    # a docker-compose.override.yml:
+    #   worker-custom:
+    #     deploy:
+    #       resources:
+    #         reservations:
+    #           devices:
+    #             - driver: nvidia
+    #               count: 1
+    #               capabilities: [gpu]
     volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
-      - ./scripts:/app/scripts
+      - ./segmentation:/app/segmentation
       - ./logs:/app/logs
       - ./data:/app/data
       - ./models:/app/models
@@ -109,10 +109,9 @@ services:
     image: music-segmentation-worker:latest
     build:
       context: .
-      dockerfile: workers/Dockerfile
+      dockerfile: segmentation/workers/Dockerfile
     volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
+      - ./segmentation:/app/segmentation
       - ./logs:/app/logs
       - media_data:/app/media
     env_file:
@@ -130,10 +129,9 @@ services:
     image: music-segmentation-worker:latest
     build:
       context: .
-      dockerfile: workers/Dockerfile
+      dockerfile: segmentation/workers/Dockerfile
     volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
+      - ./segmentation:/app/segmentation
       - ./logs:/app/logs
       - media_data:/app/media
     env_file:
@@ -151,10 +149,9 @@ services:
     image: music-segmentation-worker:latest
     build:
       context: .
-      dockerfile: workers/Dockerfile
+      dockerfile: segmentation/workers/Dockerfile
     volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
+      - ./segmentation:/app/segmentation
       - ./logs:/app/logs
       - media_data:/app/media
     env_file:
@@ -172,10 +169,9 @@ services:
     image: music-segmentation-worker:latest
     build:
       context: .
-      dockerfile: workers/Dockerfile
+      dockerfile: segmentation/workers/Dockerfile
     volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
+      - ./segmentation:/app/segmentation
       - ./logs:/app/logs
       - media_data:/app/media
     env_file:
@@ -185,28 +181,6 @@ services:
       WORKER_TYPE: fusion_segmentation
       MESSAGE_CODE: segmentation.fusion
       WORKER_CONCURRENCY: 2
-    depends_on:
-      - music_segmentation_rabbitmq
-  worker-llm-1:
-    container_name: worker-llm-1
-    image: music-segmentation-worker:latest
-    build:
-      context: .
-      dockerfile: workers/Dockerfile
-    volumes:
-      - ./workers:/app/workers
-      - ./shared:/app/shared
-      - ./logs:/app/logs
-      - media_data:/app/media
-      - ./data:/app/data
-    env_file:
-      - ./.env
-    environment:
-      SERVICE_NAME: worker-llm-1
-      WORKER_TYPE: llm_segmentation
-      MESSAGE_CODE: segmentation.llm
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
-      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-}
     depends_on:
       - music_segmentation_rabbitmq
   minio:
@@ -267,11 +241,23 @@ services:
       context: ./frontend/music-segmentation-ui
       dockerfile: Dockerfile
       args:
-        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:8000}
+        # Same-origin through the gateway (avoids CORS entirely). Override
+        # only if you intentionally want the frontend to bypass the gateway.
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost/api}
     ports:
       - "5173:80"
     depends_on:
       - music_segmentation_backend
+  gateway:
+    container_name: music_segmentation_gateway
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - music_segmentation_backend
+      - frontend
 volumes:
   postgres_data: null
   rabbitmq_data: null

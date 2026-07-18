@@ -1,0 +1,29 @@
+name: music-segmentation-worker-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - ffmpeg
+  - numpy<1.24
+  - scipy<1.9.0
+  - pika
+  - pip
+  - pip:
+    # msaf/librosa/torch are pinned to the last known-working combination —
+    # this stack (numpy<1.24 + scipy<1.9 + msaf) is fragile; an unpinned
+    # rebuild can silently pull incompatible versions and crash every worker
+    # (see segmentation/workers/main.py's lazy import comment).
+    - msaf[all]==0.1.80
+    - librosa==0.10.1
+    - portalocker
+    - azure-storage-blob
+    - azure-core
+    - boto3
+    - pyarrow
+    - pydantic-settings
+    - mir_eval
+    - lightgbm
+    - --extra-index-url https://download.pytorch.org/whl/cu124
+    - torch==2.5.1
+    - torchaudio==2.5.1
